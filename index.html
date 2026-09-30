@@ -194,7 +194,11 @@
 <aside>
   <header>
     <div class="brand"><h1>MCP Hub</h1><span class="dim" id="toolCount"></span></div>
-    <select id="server" aria-label="Server"></select>
+    <div style="display:flex;gap:6px">
+      <select id="server" aria-label="Server" style="flex:1;min-width:0"></select>
+      <button class="btn sm" id="removeServer" title="Remove this server from mcphub (deletes its mcps/ file)">Remove</button>
+    </div>
+    <div id="serverDesc" class="dim" style="font-size:12px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden"></div>
     <div class="search">
       <input id="filter" class="input" placeholder="Search tools" aria-label="Search tools" autocomplete="off">
       <kbd>/</kbd>
@@ -205,6 +209,15 @@
     </div>
   </header>
   <div id="list" role="listbox" aria-label="Tools"></div>
+  <details id="addHelp" style="border-top:1px solid var(--line);padding:8px 12px;font-size:12px">
+    <summary class="dim" style="cursor:pointer">Add a server</summary>
+    <div class="dim" style="margin-top:6px;line-height:1.5">
+      Ask your coding agent: <code>add me Slack MCP to mcphub</code> (skill <code>mcphub-mcps</code>).<br>
+      Or run <code>python3 serve.py add &lt;slug&gt; --name "Name"</code>. Find slugs with <code>mcp-s-cli get-servers</code>.
+      New files in <code>mcps/</code> show up on reload, no restart needed.
+    </div>
+    <div id="problems" class="bad" style="margin-top:6px;white-space:pre-wrap"></div>
+  </details>
 </aside>
 
 <main>
@@ -221,9 +234,9 @@
       <button id="descMore" class="linkbtn" hidden>Show full description</button>
       <span id="examples" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></span>
     </div>
-    <details id="teachBox" hidden style="margin-top:6px">
-      <summary class="dim" style="cursor:pointer;font-size:12.5px">Context Search API - what running it live actually shows</summary>
-      <pre id="teach" class="dim mono" style="white-space:pre-wrap;margin:6px 0 0"></pre>
+    <details id="notesBox" hidden style="margin-top:6px">
+      <summary class="dim" style="cursor:pointer;font-size:12.5px" id="notesTitle">Server notes</summary>
+      <pre id="notes" class="dim mono" style="white-space:pre-wrap;margin:6px 0 0"></pre>
     </details>
   </section>
 
@@ -459,45 +472,11 @@ const setSide = (side) => {
 document.querySelectorAll("[data-side]").forEach((b) => (b.onclick = () => setSide(b.dataset.side)));
 
 // ---------------------------------------------------------------- server + tool selection
-// Findings from actually driving the API through this app via chrome-devtools-mcp
-// (2026-09-09) - not paraphrased off the Slack announcement, verified live.
-const CONTEXT_TEACHING = `\
-1. capabilities embeds the full request schema for both POST endpoints, verbatim -
-   down to the source docstring on domain_ids / conversation_id / caller semantics
-   (see result.filters in a capabilities call). That's more than the announcement
-   shows and it can't drift from the code, so read it before any external doc.
-
-2. /domains ranks ALL 181 domains, not just searchable ones. considered[] included
-   is_searchable:false entries (suppliers_hub, user_success ranked #4/#5 for a
-   restaurants query) - routing doesn't filter by searchability, retrieval does.
-   rank is the domain's absolute position across all 181, not a 0..limit-1 index:
-   a limit:3 response showed ranks 1, 3, 4.
-
-3. DOMAIN_NOT_SEARCHABLE is real and reproducible. domain_ids:["ab_test"] (capabilities
-   marks it is_searchable:false) -> transport 200, statusCode 400, body:
-   {"success":false,"error":"Domain(s) have no published content to search: ab_test",
-   "error_type":"DOMAIN_NOT_SEARCHABLE"}. This app's context_call() correctly
-   surfaced it as isError despite the 200 - confirms the statusCode/body gotcha
-   is real and the decode here is right.
-
-4. Table names really do only arrive as prose. A KPI hit's content reads like:
-   "...Sources: prod.rest.monthly_churn (Readiness status.); prod.rest.restaurants_gpv_dim
-   (Order volume.)." No structured table field exists in the response.
-
-5. include_answer:true is genuinely grounded, not a rubber stamp. Live model was
-   accounts/fireworks/models/deepseek-v4-flash-0731. It cited only 1 of 5 retrieved
-   chunks (chunks_used:5) and explicitly said what was MISSING from context rather
-   than guessing - cited_doc_ids is a real subset of what it was given, not all of it.
-
-6. A vague query did not trigger the documented "clarification" response. Tried
-   "how is it going" expecting it - still routed normally (server_routed,
-   multi_domain, 3 domains selected, top confidence only 0.79). Clarification
-   exists per the docs but isn't as simple as "ask something vague" - didn't
-   reproduce it in one try.`;
+// Server notes live in each mcps/<server>.json ("notes"), shown above the input.
 
 const loadServer = async (server, toolName, hashArgs) => {
   S.server = server; $("server").value = server;
-  $("teachBox").hidden = server !== "context-search"; $("teach").textContent = CONTEXT_TEACHING;
+  renderServerInfo();
   // Stale-while-revalidate: show the last known tool list at once, refresh it in the background.
   const cached = S.toolCache[server] || store.get("tools:" + server);
   S.tools = cached || []; S.toolsError = null; S.toolsLoading = !cached;
@@ -1152,15 +1131,58 @@ window.addEventListener("hashchange", () => {
   loadServer(server, tool, args);
 });
 
+// ---------------------------------------------------------------- server registry (mcps/*.json)
+const loadServers = async () => {
+  const r = await fetch("/api/servers").then((r) => r.json());
+  S.serverInfo = Object.fromEntries(r.servers.map((c) => [c.id, c]));
+  S.servers = r.servers.map((c) => c.id);
+  $("server").replaceChildren(...r.servers.map((c) => h("option", { value: c.id, title: c.id }, c.name === c.id ? c.id : `${c.name} (${c.id.split(":").pop()})`)));
+  if (S.server) $("server").value = S.server;
+  const bad = Object.entries(r.problems || {});
+  $("problems").textContent = bad.map(([f, errs]) => `Invalid mcps/${f}: ${errs.join("; ")}`).join("\n");
+  if (bad.length) $("addHelp").open = true;
+};
+const renderServerInfo = () => {
+  const c = S.serverInfo?.[S.server];
+  $("serverDesc").textContent = c ? firstLine(c.description) : "";
+  $("serverDesc").title = c?.description || "";
+  $("removeServer").disabled = !c;
+  resetRemove();
+  $("notesBox").hidden = !c?.notes;
+  $("notesTitle").textContent = `Notes on ${c?.name || ""}`;
+  $("notes").textContent = Array.isArray(c?.notes) ? c.notes.join("\n") : c?.notes || "";
+};
+// Removing needs a second click within 5s; the button says what it will delete.
+let removeArmed = null;
+const resetRemove = () => {
+  clearTimeout(removeArmed); removeArmed = null;
+  const b = $("removeServer"); b.textContent = "Remove"; b.className = "btn sm"; b.title = "Remove this server from mcphub (deletes its mcps/ file)";
+};
+$("removeServer").onclick = async () => {
+  const c = S.serverInfo?.[S.server]; if (!c) return;
+  const b = $("removeServer");
+  if (!removeArmed) {
+    b.textContent = "Confirm"; b.className = "btn sm danger"; b.title = `Click again to delete mcps/${c.file}`;
+    toast(`Click Confirm to remove ${c.name}`);
+    removeArmed = setTimeout(resetRemove, 5000);
+    return;
+  }
+  resetRemove();
+  const r = await fetch(`/api/servers/${encodeURIComponent(c.id)}`, { method: "DELETE" }).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+  if (r.error) return toast(`Could not remove: ${r.error}`);
+  delete S.toolCache[c.id]; store.set("tools:" + c.id, null);
+  toast(`Removed ${c.name}. History is kept.`);
+  await loadServers();
+  S.server = S.servers[0]; resetMain(); loadServer(S.server);
+};
+
 // ---------------------------------------------------------------- boot
 (async () => {
   S.inMode = store.get("inMode") || "form";
-  const [servers] = await Promise.all([fetch("/api/servers").then((r) => r.json()), loadHistory()]);
-  S.servers = servers;
-  $("server").replaceChildren(...servers.map((n) => h("option", { value: n }, n)));
+  await Promise.all([loadServers(), loadHistory()]);
   const { server, tool, args } = fromHash();
   setLog(!!store.get("logOpen"));
-  S.server = server || store.get("server") || servers[0];
+  S.server = server || (S.servers.includes(store.get("server")) ? store.get("server") : S.servers[0]);
   resetMain();
   await loadServer(S.server, tool, args);
   $("server").addEventListener("change", () => store.set("server", $("server").value));

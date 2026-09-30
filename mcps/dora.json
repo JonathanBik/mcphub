@@ -1,0 +1,6 @@
+{
+  "id": "dora",
+  "name": "Dora",
+  "type": "gateway",
+  "description": "exposes MCP tools that call the DOA (DataOrg Agents) backend API. You can ask questions to configured agents, list available agents, and check the status of async chat jobs."
+}

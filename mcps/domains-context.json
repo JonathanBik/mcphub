@@ -1,0 +1,6 @@
+{
+  "id": "domains-context",
+  "name": "Domains Context",
+  "type": "gateway",
+  "description": "Exposes structured domain knowledge from the Context Hub platform."
+}

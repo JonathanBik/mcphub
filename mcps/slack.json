@@ -1,0 +1,8 @@
+{
+  "id": "slack",
+  "name": "Slack",
+  "type": "gateway",
+  "description": "provides secure access to your Slack workspace, allowing AI agents and other integrations to interact with your team's data.",
+  "added": "2026-10-01",
+  "verified_tools": 30
+}

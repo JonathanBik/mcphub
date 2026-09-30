@@ -2,137 +2,117 @@
 """Local playground for the mcp-s.wewix.net MCP servers.
 
 Reuses the OAuth token mcp-s-cli already stored, so there is no auth flow here.
-Run:  python3 serve.py        then open http://localhost:8791
+Servers are JSON files in mcps/ (see README.md).
+
+Run:     python3 serve.py                       then open http://localhost:8791
+Manage:  python3 serve.py list | inspect <slug> | add <slug> [--name N] [--description D] | remove <id>
+Test:    python3 serve.py --selftest
 """
 
 import json
 import os
+import re
 import sqlite3
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 GATEWAY = "https://mcp-s.wewix.net"
 AUTH_FILE = Path.home() / ".config/mcp-s-cli/auth.json"
-SERVERS = ["dora", "trino", "wix-connect", "domains-context", "jonathanbik@wix.com:dora-preview-1-35-0",
-           "context-search", "openmetadata"]
 HERE = Path(__file__).parent
 PORT = int(os.environ.get("PORT", 8791))
 
-# The Context Search API isn't MCP - plain REST, no auth, on the Wix network.
-# Modeled as 3 fixed synthetic "tools" so it rides the existing tool-list/args/run
-# UI unchanged. See https://bo.wix.com/stash/dora-context-api-demo/
-CONTEXT_BASE = "https://wix-bo.com/_api/context-store-serverless"
-CONTEXT_PATHS = {
-    "context__capabilities": ("GET", "/api/context/capabilities"),
-    "context__domains": ("POST", "/api/context/domains"),
-    "context__search": ("POST", "/api/context/search"),
-}
-CONTEXT_TOOLS = [
-    {
-        "name": "context__capabilities",
-        "description": (
-            "GET, no body, no auth. Call once per session, before searching: returns "
-            "domain_count / searchable_domain_count, the kb_types vocabulary (product, "
-            "business, analytical are searchable; reports and rules exist but are never "
-            "embedded, so filtering to them always returns nothing), doc_kinds "
-            "(object/property/rel), max_domain_ids, and doc_id_format. The response also "
-            "embeds the full request JSON-schema for both POST endpoints under "
-            "result.filters, straight from the source docstring - read that instead of any "
-            "external doc, it can't drift from the code.\n\n"
-            "Example: no args needed - just Run."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "context__domains",
-        "description": (
-            "POST. Where does this question live? Ranking only, no content retrieved - "
-            "cheaper than context__search when you just want to see or confirm routing. "
-            "Most callers should call context__search directly instead, since it routes "
-            "internally too.\n\n"
-            "Ranks ALL domains, not just searchable ones: considered[] includes "
-            "is_searchable:false entries mixed in below the searchable ones, and `rank` is "
-            "each domain's absolute position across every domain, not a 0..limit-1 index - "
-            "a limit:3 response can show ranks 1, 3, 4.\n\n"
-            "Example: {\"query\": \"How many active restaurant order sites were there last "
-            "month\", \"limit\": 5} -> routing.selected includes \"restaurants\"."
-        ),
-        "inputSchema": {
-            "type": "object", "required": ["query"],
-            "properties": {
-                "query": {"type": "string"},
-                "limit": {"type": "integer", "default": 5},
-                "caller": {"type": "string", "default": "mcphub"},
-                "conversation_id": {"type": "string"},
-            },
-        },
-    },
-    {
-        "name": "context__search",
-        "description": (
-            "POST. Routes (or uses domain_ids to skip routing) and retrieves matching "
-            "context in one call - the one endpoint most callers actually need.\n\n"
-            "domain_ids supplied -> routing is skipped, exactly those domains are searched; "
-            "if one is_searchable:false (check via context__capabilities first), you get "
-            "statusCode 400 DOMAIN_NOT_SEARCHABLE - verified live with domain_ids:[\"ab_test\"]: "
-            "{\"success\":false,\"error\":\"Domain(s) have no published content to search: "
-            "ab_test\",\"error_type\":\"DOMAIN_NOT_SEARCHABLE\"}.\n\n"
-            "KPIs only: kb_types:[\"analytical\"], doc_kinds:[\"object\"] - the analytical KB "
-            "embeds its relationships under the same kb_type, so doc_kinds is what narrows it.\n\n"
-            "Table names only ever arrive as prose inside a KPI's \"Sources:\" line (verified "
-            "live) - there is no structured table field to filter or read.\n\n"
-            "include_answer:true adds an answer object {text, model, cited_doc_ids, "
-            "chunks_used} synthesized over the retrieved chunks (live model: "
-            "deepseek-v4-flash-0731). cited_doc_ids is the checked intersection of what the "
-            "model cited and what it was actually given - safe to render as provenance. Off "
-            "by default: summarizing passages beforehand throws away context you could have "
-            "used yourself.\n\n"
-            "Gotcha: the gateway always answers transport HTTP 200 - the real status is "
-            "`statusCode` inside the response; this tool (context_call() in serve.py) already "
-            "decodes that, so isError in this UI reflects the real status.\n\n"
-            "Example: {\"query\": \"How many active restaurant order sites were there last "
-            "month\", \"limit\": 5} -> results[0] is the KPI active_restaurants_orders_sites, "
-            "Sources: prod.rest.monthly_churn, prod.rest.restaurants_gpv_dim."
-        ),
-        "inputSchema": {
-            "type": "object", "required": ["query"],
-            "properties": {
-                "query": {"type": "string"},
-                "limit": {"type": "integer", "default": 5},
-                "caller": {"type": "string", "default": "mcphub"},
-                "conversation_id": {"type": "string"},
-                "domain_ids": {"type": "array", "items": {"type": "string"}},
-                "kb_types": {"type": "array", "items": {"type": "string"}},
-                "doc_kinds": {"type": "array", "items": {"type": "string"}},
-                "include_answer": {"type": "boolean", "default": False},
-            },
-        },
-    },
-]
+# Server registry: one JSON file per server in mcps/, read on every request, so
+# adding or removing a file takes effect without a restart. Two types:
+#   gateway - an MCP server behind the mcp-s gateway; "id" is its catalog slug.
+#   rest    - a plain REST API modeled as synthetic tools (base_url + tools[] with
+#             method/path/inputSchema), so it rides the same tool-list/run UI.
+MCPS_DIR = HERE / "mcps"
+TYPES = ("gateway", "rest")
 
 
-def context_call(tool, args):
-    """Plain REST call to the context-store-serverless gateway - no MCP, no auth.
+def validate(cfg):
+    """Problems with one server config, as a list of strings (empty = valid)."""
+    errs = []
+    if not isinstance(cfg, dict):
+        return ["top level must be a JSON object"]
+    for key in ("id", "name", "type"):
+        if not isinstance(cfg.get(key), str) or not cfg[key].strip():
+            errs.append(f"missing string field {key!r}")
+    if cfg.get("type") not in TYPES:
+        errs.append(f"type must be one of {TYPES}")
+    if cfg.get("type") == "rest":
+        if not str(cfg.get("base_url", "")).startswith("http"):
+            errs.append("rest server needs base_url")
+        tools = cfg.get("tools")
+        if not isinstance(tools, list) or not tools:
+            errs.append("rest server needs a non-empty tools list")
+        for t in tools or []:
+            missing = [k for k in ("name", "method", "path", "inputSchema") if k not in t]
+            if missing:
+                errs.append(f"tool {t.get('name', '?')!r} missing {missing}")
+    return errs
 
-    It always answers transport HTTP 200; the real status is `statusCode` inside
-    a JSON-string `body` envelope (the API's own documented gotcha) - decode that
-    instead of trusting the transport code. Returns (payload, ok).
+
+def load_mcps():
+    """(configs by id, problems by file name). Invalid files are skipped, never fatal."""
+    servers, problems = {}, {}
+    for f in sorted(MCPS_DIR.glob("*.json")):
+        try:
+            cfg = json.loads(f.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            problems[f.name] = [f"unreadable: {e}"]
+            continue
+        errs = validate(cfg)
+        if not errs and cfg["id"] in servers:
+            errs = [f"duplicate id {cfg['id']!r} (also in {servers[cfg['id']]['file']})"]
+        if errs:
+            problems[f.name] = errs
+            continue
+        servers[cfg["id"]] = {**cfg, "file": f.name}
+    return servers, problems
+
+
+def file_for(server_id):
+    """mcps/<name>.json for a server id: the catalog slug, minus any user@ prefix."""
+    return MCPS_DIR / (re.sub(r"[^a-z0-9._-]+", "-", server_id.split(":")[-1].lower()).strip("-") + ".json")
+
+
+def rest_call(cfg, tool, args):
+    """Plain REST call for a "rest" server - no MCP, no auth.
+
+    Some gateways (context-store-serverless) always answer transport HTTP 200 and
+    put the real status in `statusCode` plus a JSON-string `body` envelope; decode
+    that when present instead of trusting the transport code. Returns (payload, ok).
     """
-    method, path = CONTEXT_PATHS[tool]
+    t = next((x for x in cfg["tools"] if x["name"] == tool), None)
+    if t is None:
+        return f"tool {tool!r} is not defined in mcps/{cfg['file']}", False
+    method = t["method"].upper()
     req = urllib.request.Request(
-        CONTEXT_BASE + path,
-        data=json.dumps(args).encode() if method == "POST" else None,
+        cfg["base_url"].rstrip("/") + t["path"],
+        data=json.dumps(args).encode() if method != "GET" else None,
         method=method,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        envelope = json.loads(r.read())
-    body = envelope.get("body")
-    payload = json.loads(body) if isinstance(body, str) else body
-    return payload, envelope.get("statusCode", 200) < 400
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            envelope, status = maybe_json(r.read().decode(errors="replace")), r.status
+    except urllib.error.HTTPError as e:
+        envelope, status = maybe_json(e.read().decode(errors="replace")), e.code
+    if isinstance(envelope, dict) and "statusCode" in envelope and "body" in envelope:
+        body = envelope["body"]
+        return (maybe_json(body) if isinstance(body, str) else body), envelope["statusCode"] < 400
+    return envelope, status < 400
+
+
+def public(cfg):
+    """What the browser needs to know about a server (rest tools are served by /api/tools)."""
+    return {k: cfg.get(k) for k in ("id", "name", "type", "description", "notes", "file")}
 
 # File-based store for logs and call history, so both survive a restart -
 # a single sqlite3 file next to this script. ponytail: a fresh connection per
@@ -207,7 +187,7 @@ def token():
 def rpc(server, method, params):
     """One JSON-RPC call. The gateway is stateless, so no initialize handshake."""
     req = urllib.request.Request(
-        f"{GATEWAY}/mcp?mcp={server}",
+        f"{GATEWAY}/mcp?mcp={urllib.parse.quote(server, safe='')}",
         data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode(),
         headers={
             "Authorization": f"Bearer {token()}",
@@ -278,22 +258,41 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self):
-        if self.path == "/api/servers":
-            self._send(200, SERVERS)
-        elif self.path == "/api/logs":
+        url = urllib.parse.urlsplit(self.path)
+        qs = urllib.parse.parse_qs(url.query)
+        if url.path == "/api/servers":
+            servers, problems = load_mcps()
+            self._send(200, {"servers": [public(c) for c in servers.values()], "problems": problems})
+        elif url.path == "/api/logs":
             self._send(200, recent_logs())
-        elif self.path == "/api/history":
+        elif url.path == "/api/history":
             self._send(200, recent_history())
-        elif self.path.startswith("/api/tools"):
-            server = self.path.split("server=")[-1]
-            if server == "context-search":
-                self._send(200, {"result": {"tools": CONTEXT_TOOLS}, "isError": False})
+        elif url.path == "/api/tools":
+            server = qs.get("server", [""])[0]
+            cfg = load_mcps()[0].get(server)
+            if cfg is None:
+                self._send(404, {"error": f"no server {server!r} in mcps/"})
+            elif cfg["type"] == "rest":
+                tools = [{k: v for k, v in t.items() if k not in ("method", "path")} for t in cfg["tools"]]
+                self._send(200, {"result": {"tools": tools}, "isError": False})
             else:
                 self._guarded(lambda: rpc(server, "tools/list", {}))
-        elif self.path.split("?")[0] in ("/", "/index.html"):
+        elif url.path in ("/", "/index.html"):
             self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         else:
             self._send(404, {"error": "not found"})
+
+    def do_DELETE(self):
+        url = urllib.parse.urlsplit(self.path)
+        if not url.path.startswith("/api/servers/"):
+            return self._send(404, {"error": "not found"})
+        server = urllib.parse.unquote(url.path[len("/api/servers/"):])
+        try:
+            removed = remove_server(server)
+        except KeyError as e:
+            return self._send(404, {"error": str(e)})
+        log(f"[server-removed] {server} ({removed})")
+        self._send(200, {"ok": True, "removed": removed})
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
@@ -303,9 +302,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
         log(f"[request] server={body.get('server')} tool={body.get('tool')} "
             f"args={json.dumps(body.get('args', {}))[:2000]}")
-        if body.get("server") == "context-search":
+        cfg = load_mcps()[0].get(body.get("server"))
+        if cfg is None:
+            return self._send(200, {"error": f"no server {body.get('server')!r} in mcps/ - was it removed?"})
+        if cfg["type"] == "rest":
             try:
-                payload, ok = context_call(body["tool"], body.get("args", {}))
+                payload, ok = rest_call(cfg, body["tool"], body.get("args", {}))
             except Exception as e:  # noqa: BLE001 - surface anything to the browser
                 log(f"[exception] {type(e).__name__}: {e}")
                 return self._send(200, {"error": f"{type(e).__name__}: {e}"})
@@ -340,6 +342,99 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, out)
 
 
+# ---------------------------------------------------------------- server management CLI
+
+def list_tools(server_id):
+    """Live tools/list for a gateway slug; raises with a readable message on any failure."""
+    out = rpc(server_id, "tools/list", {})
+    if "error" in out:
+        raise RuntimeError(f"gateway error for {server_id!r}: {json.dumps(out['error'])[:500]}")
+    tools = (out.get("result") or {}).get("tools")
+    if not tools:
+        raise RuntimeError(f"{server_id!r} returned no tools - wrong slug, or no access?")
+    return tools
+
+
+def tool_summary(tools):
+    """Counts by MCP annotation: read-only, destructive, and the rest."""
+    ann = [t.get("annotations") or {} for t in tools]
+    ro = sum(1 for a in ann if a.get("readOnlyHint"))
+    de = sum(1 for a in ann if a.get("destructiveHint") and not a.get("readOnlyHint"))
+    return {"tools": len(tools), "read_only": ro, "destructive": de, "other": len(tools) - ro - de}
+
+
+def add_server(server_id, name=None, description="", force=False):
+    """Verify a gateway slug live, then write mcps/<slug>.json. Returns (path, summary)."""
+    servers, _ = load_mcps()
+    path = file_for(server_id)
+    if server_id in servers and not force:
+        raise FileExistsError(f"{server_id!r} is already added ({servers[server_id]['file']}); pass --force to overwrite")
+    if path.exists() and not force:
+        raise FileExistsError(f"{path.name} already exists; pass --force to overwrite")
+    tools = list_tools(server_id)  # the verification: no file is written unless this works
+    summary = tool_summary(tools)
+    cfg = {"id": server_id, "name": name or server_id.replace("-", " ").title(), "type": "gateway",
+           "description": description, "added": time.strftime("%Y-%m-%d"), "verified_tools": summary["tools"]}
+    assert not validate(cfg), validate(cfg)
+    MCPS_DIR.mkdir(exist_ok=True)
+    path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+    return path, summary
+
+
+def remove_server(server_id):
+    """Delete the config file for a server id. Returns the removed file name."""
+    servers, _ = load_mcps()
+    if server_id not in servers:
+        raise KeyError(f"no server {server_id!r} in mcps/")
+    (MCPS_DIR / servers[server_id]["file"]).unlink()
+    return servers[server_id]["file"]
+
+
+def first_line(text, width=110):
+    line = " ".join((text or "").strip().split("\n\n")[0].split())
+    return line if len(line) <= width else line[: width - 1] + "…"
+
+
+def cli(argv):
+    """list | inspect <slug> | add <slug> [--name N] [--description D] [--force] | remove <id>. Exit 0 on success."""
+    cmd, args = argv[0], argv[1:]
+    opt = lambda flag: args[args.index(flag) + 1] if flag in args and args.index(flag) + 1 < len(args) else None
+    pos = [a for i, a in enumerate(args) if not a.startswith("--") and (i == 0 or args[i - 1] not in ("--name", "--description"))]
+    try:
+        if cmd == "list":
+            servers, problems = load_mcps()
+            for c in servers.values():
+                print(f"{c['id']:<42} {c['type']:<8} {c['name']:<24} mcps/{c['file']}")
+            for f, errs in problems.items():
+                print(f"INVALID mcps/{f}: {'; '.join(errs)}", file=sys.stderr)
+            return 1 if problems else 0
+        if cmd == "inspect":
+            tools = list_tools(pos[0])
+            s = tool_summary(tools)
+            print(f"{pos[0]}: {s['tools']} tools ({s['read_only']} read-only, {s['destructive']} destructive, {s['other']} unmarked)")
+            for t in tools:
+                a = t.get("annotations") or {}
+                tag = "RO " if a.get("readOnlyHint") else "DEL" if a.get("destructiveHint") else "   "
+                req = (t.get("inputSchema") or {}).get("required") or []
+                print(f"  {tag} {t['name']}({', '.join(req)})  {first_line(t.get('description'))}")
+            return 0
+        if cmd == "add":
+            path, s = add_server(pos[0], opt("--name"), opt("--description") or "", "--force" in args)
+            print(f"added {pos[0]} -> {path.relative_to(HERE)}: {s['tools']} tools "
+                  f"({s['read_only']} read-only, {s['destructive']} destructive, {s['other']} unmarked)")
+            return 0
+        if cmd == "remove":
+            print(f"removed {pos[0]} (mcps/{remove_server(pos[0])})")
+            return 0
+    except IndexError:
+        pass
+    except (AuthError, RuntimeError, FileExistsError, KeyError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 4 if isinstance(e, AuthError) else 1
+    print(cli.__doc__, file=sys.stderr)
+    return 2
+
+
 def selftest():
     text = lambda s, err=False: {"content": [{"type": "text", "text": s}], "isError": err}
     assert unwrap(text('{"a":1}')) == ({"a": 1}, False)
@@ -351,15 +446,19 @@ def selftest():
     many = {"content": [{"type": "text", "text": '{"id":1}'}, {"type": "text", "text": "raw"}]}
     assert unwrap(many) == ([{"id": 1}, "raw"], False)
 
-    tools = rpc("dora", "tools/list", {})["result"]["tools"]
-    assert any(t["name"] == "dora__list_dora_agents" for t in tools), tools
+    # registry: every file valid, and the validator catches the common mistakes
+    servers, problems = load_mcps()
+    assert not problems, problems
+    assert "context-search" in servers and servers["context-search"]["type"] == "rest"
+    assert validate({"id": "x", "name": "X", "type": "rest"}) and validate({"id": "x", "type": "gateway"})
+    assert not validate({"id": "x", "name": "X", "type": "gateway"})
+    assert file_for("jonathanbik@wix.com:dora-preview-1-35-0").name == "dora-preview-1-35-0.json"
+
+    tools = list_tools("dora")
+    assert all(t["name"].startswith("dora__") for t in tools), [t["name"] for t in tools]
     assert all("inputSchema" in t for t in tools)
 
-    live, err = unwrap(rpc("domains-context", "tools/call",
-                           {"name": "domains-context__list_domains", "arguments": {}})["result"])
-    assert not err and isinstance(live, dict) and "domains" in live, live
-
-    caps, ok = context_call("context__capabilities", {})
+    caps, ok = rest_call(servers["context-search"], "context__capabilities", {})
     assert ok and isinstance(caps, dict) and caps, caps
 
     add_history({"t": 0, "server": "__selftest__", "tool": "y", "args": {"a": 1}, "result": {"b": 2}, "failed": False})
@@ -368,13 +467,15 @@ def selftest():
     with db() as conn:
         conn.execute("DELETE FROM history WHERE server = '__selftest__'")
 
-    print(f"ok - unwrap, {len(tools)} dora tools, {live['count']} domains unwrapped, "
+    print(f"ok - unwrap, {len(servers)} valid server files, {len(tools)} dora tools, "
           f"context API reachable, sqlite history round-trips")
 
 
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
+    elif len(sys.argv) > 1:
+        sys.exit(cli(sys.argv[1:]))
     else:
-        print(f"http://localhost:{PORT}   servers: {', '.join(SERVERS)}")
+        print(f"http://localhost:{PORT}   servers: {', '.join(load_mcps()[0])}")
         ThreadingHTTPServer(("localhost", PORT), Handler).serve_forever()

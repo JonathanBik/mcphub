@@ -1,0 +1,6 @@
+{
+  "id": "wix-connect",
+  "name": "Wix Connect",
+  "type": "gateway",
+  "description": "Manage Wix Connect user research projects and interviews. Enables AI assistants to list, create, and track user research campaigns, scheduled meetings, and marketing outreach"
+}

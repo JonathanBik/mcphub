@@ -1,0 +1,6 @@
+{
+  "id": "trino",
+  "name": "Trino",
+  "type": "gateway",
+  "description": "Provides a set of tools for querying data through the Trino engine and generating insights from Wix data"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "openmetadata",
+  "name": "Open Metadata",
+  "type": "gateway",
+  "description": "Provides a set of tools for exploring metadata, managing data assets (such as tables, dashboards, pipelines, and topics), and connecting business domains and glossaries to those assets, making it easier to discover, understand, and further explore them using tools like Trino MCP."
+}

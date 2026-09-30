@@ -1,0 +1,98 @@
+{
+  "id": "context-search",
+  "name": "Context Search",
+  "type": "rest",
+  "base_url": "https://wix-bo.com/_api/context-store-serverless",
+  "description": "Context Search REST API (not MCP, no auth, Wix network): route a question to domains and retrieve KB context. See https://bo.wix.com/stash/dora-context-api-demo/",
+  "notes": "Findings from driving the API through this app via chrome-devtools-mcp (2026-09-09), verified live.\n\n1. capabilities embeds the full request schema for both POST endpoints, verbatim -\n   down to the source docstring on domain_ids / conversation_id / caller semantics\n   (see result.filters in a capabilities call). That's more than the announcement\n   shows and it can't drift from the code, so read it before any external doc.\n\n2. /domains ranks ALL 181 domains, not just searchable ones. considered[] included\n   is_searchable:false entries (suppliers_hub, user_success ranked #4/#5 for a\n   restaurants query) - routing doesn't filter by searchability, retrieval does.\n   rank is the domain's absolute position across all 181, not a 0..limit-1 index:\n   a limit:3 response showed ranks 1, 3, 4.\n\n3. DOMAIN_NOT_SEARCHABLE is real and reproducible. domain_ids:[\"ab_test\"] (capabilities\n   marks it is_searchable:false) -> transport 200, statusCode 400, body:\n   {\"success\":false,\"error\":\"Domain(s) have no published content to search: ab_test\",\n   \"error_type\":\"DOMAIN_NOT_SEARCHABLE\"}. This app's context_call() correctly\n   surfaced it as isError despite the 200 - confirms the statusCode/body gotcha\n   is real and the decode here is right.\n\n4. Table names really do only arrive as prose. A KPI hit's content reads like:\n   \"...Sources: prod.rest.monthly_churn (Readiness status.); prod.rest.restaurants_gpv_dim\n   (Order volume.).\" No structured table field exists in the response.\n\n5. include_answer:true is genuinely grounded, not a rubber stamp. Live model was\n   accounts/fireworks/models/deepseek-v4-flash-0731. It cited only 1 of 5 retrieved\n   chunks (chunks_used:5) and explicitly said what was MISSING from context rather\n   than guessing - cited_doc_ids is a real subset of what it was given, not all of it.\n\n6. A vague query did not trigger the documented \"clarification\" response. Tried\n   \"how is it going\" expecting it - still routed normally (server_routed,\n   multi_domain, 3 domains selected, top confidence only 0.79). Clarification\n   exists per the docs but isn't as simple as \"ask something vague\" - didn't\n   reproduce it in one try.",
+  "tools": [
+    {
+      "name": "context__capabilities",
+      "description": "GET, no body, no auth. Call once per session, before searching: returns domain_count / searchable_domain_count, the kb_types vocabulary (product, business, analytical are searchable; reports and rules exist but are never embedded, so filtering to them always returns nothing), doc_kinds (object/property/rel), max_domain_ids, and doc_id_format. The response also embeds the full request JSON-schema for both POST endpoints under result.filters, straight from the source docstring - read that instead of any external doc, it can't drift from the code.\n\nExample: no args needed - just Run.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "method": "GET",
+      "path": "/api/context/capabilities"
+    },
+    {
+      "name": "context__domains",
+      "description": "POST. Where does this question live? Ranking only, no content retrieved - cheaper than context__search when you just want to see or confirm routing. Most callers should call context__search directly instead, since it routes internally too.\n\nRanks ALL domains, not just searchable ones: considered[] includes is_searchable:false entries mixed in below the searchable ones, and `rank` is each domain's absolute position across every domain, not a 0..limit-1 index - a limit:3 response can show ranks 1, 3, 4.\n\nExample: {\"query\": \"How many active restaurant order sites were there last month\", \"limit\": 5} -> routing.selected includes \"restaurants\".",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 5
+          },
+          "caller": {
+            "type": "string",
+            "default": "mcphub"
+          },
+          "conversation_id": {
+            "type": "string"
+          }
+        }
+      },
+      "method": "POST",
+      "path": "/api/context/domains"
+    },
+    {
+      "name": "context__search",
+      "description": "POST. Routes (or uses domain_ids to skip routing) and retrieves matching context in one call - the one endpoint most callers actually need.\n\ndomain_ids supplied -> routing is skipped, exactly those domains are searched; if one is_searchable:false (check via context__capabilities first), you get statusCode 400 DOMAIN_NOT_SEARCHABLE - verified live with domain_ids:[\"ab_test\"]: {\"success\":false,\"error\":\"Domain(s) have no published content to search: ab_test\",\"error_type\":\"DOMAIN_NOT_SEARCHABLE\"}.\n\nKPIs only: kb_types:[\"analytical\"], doc_kinds:[\"object\"] - the analytical KB embeds its relationships under the same kb_type, so doc_kinds is what narrows it.\n\nTable names only ever arrive as prose inside a KPI's \"Sources:\" line (verified live) - there is no structured table field to filter or read.\n\ninclude_answer:true adds an answer object {text, model, cited_doc_ids, chunks_used} synthesized over the retrieved chunks (live model: deepseek-v4-flash-0731). cited_doc_ids is the checked intersection of what the model cited and what it was actually given - safe to render as provenance. Off by default: summarizing passages beforehand throws away context you could have used yourself.\n\nGotcha: the gateway always answers transport HTTP 200 - the real status is `statusCode` inside the response; this tool (context_call() in serve.py) already decodes that, so isError in this UI reflects the real status.\n\nExample: {\"query\": \"How many active restaurant order sites were there last month\", \"limit\": 5} -> results[0] is the KPI active_restaurants_orders_sites, Sources: prod.rest.monthly_churn, prod.rest.restaurants_gpv_dim.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 5
+          },
+          "caller": {
+            "type": "string",
+            "default": "mcphub"
+          },
+          "conversation_id": {
+            "type": "string"
+          },
+          "domain_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "kb_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "doc_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include_answer": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "method": "POST",
+      "path": "/api/context/search"
+    }
+  ]
+}
