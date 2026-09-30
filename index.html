@@ -1,0 +1,1168 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP Hub</title>
+<style>
+  :root {
+    --bg: #0f1115; --side: #12151c; --panel: #161922; --panel2: #1c202b; --line: #262b38; --fg: #e5e9f0;
+    --dim: #97a0b3; --accent: #6ea8fe; --accent-bg: #6ea8fe22; --ok: #7ee787; --err: #ff7b72; --err-bg: #ff7b7218;
+    --warn: #e3b341; --str: #a5d6ff; --num: #ffab70; --key: #d2a8ff; --on-accent: #0b1220;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #fbfcfd; --side: #f3f5f8; --panel: #fff; --panel2: #f3f5f8; --line: #e2e6ee; --fg: #1c2029;
+      --dim: #5b6375; --accent: #0b62d6; --accent-bg: #0b62d614; --ok: #1a7f37; --err: #cf222e; --err-bg: #cf222e10;
+      --warn: #9a6700; --str: #0a3069; --num: #953800; --key: #6639ba; --on-accent: #fff;
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: grid; grid-template-columns: 300px 1fr;
+    background: var(--bg); color: var(--fg); font: 13.5px/1.5 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  code, .mono { font-family: var(--mono); font-size: 12.5px; }
+  a { color: var(--accent); }
+  kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--dim); }
+  .dim { color: var(--dim); } .bad { color: var(--err); } .good { color: var(--ok); }
+
+  /* controls */
+  .input, select, textarea {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%;
+  }
+  textarea { font-family: var(--mono); font-size: 12.5px; resize: vertical; }
+  .input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+  .btn {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer;
+    white-space: nowrap; transition: border-color .15s, background .15s;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn:focus-visible, .tab:focus-visible, .tool:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn:disabled, .input:disabled { opacity: .5; cursor: default; border-color: var(--line); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .btn.danger { background: var(--err); border-color: var(--err); color: #fff; font-weight: 600; }
+  .btn.sm { padding: 2px 8px; font-size: 12px; }
+  .tabs { display: flex; gap: 2px; background: var(--panel2); border-radius: 7px; padding: 2px; }
+  .tab { border: 0; background: none; padding: 3px 10px; border-radius: 5px; cursor: pointer; color: var(--dim); font-size: 12.5px; }
+  .tab[aria-selected="true"] { background: var(--panel); color: var(--fg); box-shadow: 0 0 0 1px var(--line); }
+  .tab:disabled { opacity: .4; cursor: default; }
+  .badge { font-size: 10.5px; padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); color: var(--dim); white-space: nowrap; line-height: 17px; }
+  .badge.ro { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .badge.destructive { color: var(--err); border-color: color-mix(in srgb, var(--err) 40%, transparent); }
+
+  /* sidebar */
+  aside { background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  aside header { padding: 12px; display: grid; gap: 8px; border-bottom: 1px solid var(--line); }
+  .brand { display: flex; align-items: baseline; gap: 8px; }
+  .brand h1 { margin: 0; font-size: 14px; }
+  .search { position: relative; }
+  .search kbd { position: absolute; right: 8px; top: 7px; pointer-events: none; }
+  #list { overflow-y: auto; flex: 1; padding: 6px; }
+  .tool {
+    display: grid; grid-template-columns: 1fr auto; gap: 0 6px; width: 100%; text-align: left; border: 0; background: none;
+    padding: 6px 8px; border-radius: 6px; cursor: pointer; color: inherit;
+  }
+  .tool:hover { background: var(--panel); }
+  .tool[aria-selected="true"] { background: var(--accent-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .tool .tname { font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool .tsub { grid-column: 1 / -1; color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool mark { background: none; color: var(--accent); font-weight: 700; }
+  .listnote { padding: 10px; color: var(--dim); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; }
+  .listnote.bad { color: var(--err); }
+
+  /* main */
+  main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .toolhead { padding: 14px 20px 10px; border-bottom: 1px solid var(--line); }
+  .titlerow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .titlerow h2 { margin: 0; font: 600 16px/1.3 var(--mono); }
+  .titlerow .spacer { flex: 1; }
+  .desc { margin-top: 6px; color: var(--dim); white-space: pre-wrap; max-width: 110ch; overflow: hidden; }
+  .desc.clamp { max-height: 4.5em; mask-image: linear-gradient(#000 55%, transparent); }
+  .desc code { color: var(--fg); background: var(--panel2); padding: 0 3px; border-radius: 3px; }
+  .desc b { color: var(--fg); }
+  .linkbtn { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; font-size: 12.5px; }
+  .panes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(340px, 5fr) 7fr; }
+  .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .pane + .pane { border-left: 1px solid var(--line); }
+  .panebar { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; min-height: 45px; }
+  .panebar h3 { margin: 0; font-size: 13px; }
+  .panebody { flex: 1; overflow: auto; padding: 14px; min-height: 0; }
+  .runbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .runbar .hint { color: var(--dim); font-size: 12px; flex: 1; }
+
+  /* form */
+  .field { margin-bottom: 14px; }
+  .field label { display: flex; align-items: baseline; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
+  .fname { font: 600 12.5px var(--mono); }
+  .ftype { font: 11.5px var(--mono); color: var(--dim); }
+  .req { color: var(--warn); font-size: 11px; }
+  .fdesc { color: var(--dim); font-size: 12px; margin-top: 3px; white-space: pre-wrap; }
+  .field.invalid .input, .field.invalid select, .field.invalid textarea { border-color: var(--err); }
+  .ferr { color: var(--err); font-size: 12px; margin-top: 3px; }
+  .field textarea.grow { resize: none; overflow: hidden; min-height: 32px; }
+  .empty { color: var(--dim); padding: 24px 4px; }
+  .empty h4 { margin: 0 0 6px; color: var(--fg); font-size: 14px; }
+  #jsonerr { color: var(--err); font-size: 12px; margin-top: 6px; }
+  .recent h4 { margin: 18px 0 6px; font-size: 12px; color: var(--dim); font-weight: 600; }
+  .hrow {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; width: 100%; text-align: left;
+    background: none; border: 0; border-radius: 6px; padding: 4px 8px; cursor: pointer; color: inherit;
+  }
+  .hrow:hover { background: var(--panel); }
+  .hline { display: flex; gap: 4px; align-items: center; } .hline .hrow { flex: 1; min-width: 0; }
+  .diff .ln { padding: 2px 6px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+  .diff .add { background: color-mix(in srgb, var(--ok) 12%, transparent); } .diff .del { background: var(--err-bg); }
+  .diff .chg { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+  .hrow .hargs { font: 12px var(--mono); color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hrow .htime { font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--ok); }
+  .dot.err { background: var(--err); }
+  aside .hrow { grid-template-columns: auto 1fr; }
+  aside .hrow .hargs, aside .hrow .htime { grid-column: 2; }
+  aside .hrow .htool { font: 12.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* output */
+  #meta { font-size: 12px; color: var(--dim); display: flex; gap: 8px; align-items: center; }
+  .pill { font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 9px; }
+  .pill.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+  .pill.err { color: var(--err); background: var(--err-bg); }
+  .pill.run { color: var(--accent); background: var(--accent-bg); }
+  .banner { border: 1px solid color-mix(in srgb, var(--err) 45%, transparent); background: var(--err-bg); border-radius: 7px; padding: 10px 12px; margin-bottom: 12px; white-space: pre-wrap; word-break: break-word; }
+  .banner strong { color: var(--err); display: block; margin-bottom: 2px; }
+  .banner .fix { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .note { color: var(--dim); font-size: 12px; margin-bottom: 10px; }
+  #out { font: 12.5px/1.55 var(--mono); }
+  .tree details > summary { list-style: none; cursor: pointer; }
+  .tree details > summary::-webkit-details-marker { display: none; }
+  .tree details > summary::before { content: "▸"; display: inline-block; width: 1em; color: var(--dim); transition: transform .15s; }
+  .tree details[open] > summary::before { transform: rotate(90deg); }
+  .tree .kids { margin-left: 1.1em; padding-left: 8px; border-left: 1px solid var(--line); }
+  .tree .row { padding-left: 1em; }
+  .tree .kids > details > summary, .tree .kids > .row { border-radius: 3px; }
+  .tree .kids > .row:hover, .tree summary:hover { background: var(--panel2); }
+  .k { color: var(--key); cursor: copy; } .s { color: var(--str); } .n { color: var(--num); } .b { color: var(--num); }
+  .prev { color: var(--dim); }
+  .sblock { display: block; white-space: pre-wrap; word-break: break-word; color: var(--str); margin: 2px 0 4px; padding: 6px 8px; background: var(--panel2); border-radius: 5px; font-family: var(--mono); max-height: 360px; overflow: auto; }
+  .hl { background: color-mix(in srgb, var(--warn) 35%, transparent); color: inherit; border-radius: 2px; }
+  pre.raw { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .tablewrap { overflow: auto; border: 1px solid var(--line); border-radius: 7px; max-height: 100%; }
+  table { border-collapse: collapse; font: 12px var(--mono); width: max-content; min-width: 100%; }
+  th, td { padding: 4px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; max-width: 420px; }
+  td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.wrap { white-space: pre-wrap; word-break: break-word; }
+  th.sortable { cursor: pointer; user-select: none; } th.sortable:hover { color: var(--accent); }
+  td { cursor: copy; } .val { cursor: copy; } .val:hover { outline: 1px dashed var(--line); outline-offset: 1px; border-radius: 2px; }
+  th { position: sticky; top: 0; background: var(--panel2); font-weight: 600; z-index: 1; }
+  tbody tr:hover { background: var(--panel2); }
+  td.num { text-align: right; color: var(--num); }
+  .textblock { margin-bottom: 14px; }
+  .textblock .path { font-size: 11.5px; color: var(--key); margin-bottom: 3px; }
+  .textblock .body { white-space: pre-wrap; word-break: break-word; font: 13px/1.55 ui-sans-serif, -apple-system, sans-serif; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 10px 12px; }
+  .skel { height: 12px; border-radius: 4px; background: var(--panel2); margin: 8px 0; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  .progress { white-space: pre-wrap; color: var(--dim); font: 12px var(--mono); }
+
+  /* log drawer */
+  #logDrawer { border-top: 1px solid var(--line); height: 34vh; display: flex; flex-direction: column; }
+  #logDrawer[hidden] { display: none; }
+  #log { flex: 1; overflow: auto; margin: 0; padding: 8px 14px; font: 11.5px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; }
+  #log .ln { padding: 3px 0; border-bottom: 1px solid var(--line); }
+  #log .tag { font-weight: 700; }
+  .t-request { color: var(--accent); } .t-response { color: var(--ok); } .t-error { color: var(--err); }
+  #toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%) translateY(8px); opacity: 0; pointer-events: none;
+    background: var(--fg); color: var(--bg); padding: 5px 12px; border-radius: 6px; font-size: 12.5px; transition: opacity .15s, transform .15s; z-index: 10;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%); }
+
+  @media (max-width: 1100px) {
+    body { grid-template-columns: 240px 1fr; }
+    .panes { grid-template-columns: 1fr; overflow-y: auto; }
+    .pane { min-height: 60vh; }
+    .pane + .pane { border-left: 0; border-top: 1px solid var(--line); }
+  }
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; min-height: 100vh; }
+    aside { max-height: 45vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<aside>
+  <header>
+    <div class="brand"><h1>MCP Hub</h1><span class="dim" id="toolCount"></span></div>
+    <select id="server" aria-label="Server"></select>
+    <div class="search">
+      <input id="filter" class="input" placeholder="Search tools" aria-label="Search tools" autocomplete="off">
+      <kbd>/</kbd>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-side="tools" aria-selected="true">Tools</button>
+      <button class="tab" role="tab" data-side="history" aria-selected="false">History</button>
+    </div>
+  </header>
+  <div id="list" role="listbox" aria-label="Tools"></div>
+</aside>
+
+<main>
+  <section class="toolhead">
+    <div class="titlerow">
+      <h2 id="name" class="dim">Pick a tool</h2>
+      <span id="badges"></span>
+      <span class="spacer"></span>
+      <button class="btn sm" id="copyCurl" hidden title="curl command that runs this call through the local hub">Copy curl</button>
+      <button class="btn sm" id="logToggle" aria-expanded="false">Server log</button>
+    </div>
+    <div id="desc" class="desc"></div>
+    <div class="titlerow" style="margin-top:4px;gap:10px">
+      <button id="descMore" class="linkbtn" hidden>Show full description</button>
+      <span id="examples" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></span>
+    </div>
+    <details id="teachBox" hidden style="margin-top:6px">
+      <summary class="dim" style="cursor:pointer;font-size:12.5px">Context Search API - what running it live actually shows</summary>
+      <pre id="teach" class="dim mono" style="white-space:pre-wrap;margin:6px 0 0"></pre>
+    </details>
+  </section>
+
+  <div class="panes">
+    <section class="pane">
+      <div class="panebar">
+        <h3>Input</h3>
+        <span class="dim" id="paramInfo" style="font-size:12px;flex:1"></span>
+        <div class="tabs" role="tablist" id="inTabs">
+          <button class="tab" role="tab" data-in="form" aria-selected="true">Form</button>
+          <button class="tab" role="tab" data-in="json" aria-selected="false">JSON</button>
+          <button class="tab" role="tab" data-in="schema" aria-selected="false">Schema</button>
+        </div>
+      </div>
+      <div class="panebody" id="inBody">
+        <div class="empty"><h4>Pick a tool on the left</h4>Use <kbd>/</kbd> to search, <kbd>↑</kbd><kbd>↓</kbd> to move, and <kbd>⌘</kbd><kbd>↵</kbd> to run.</div>
+      </div>
+      <div class="runbar">
+        <button class="btn primary" id="run" disabled>Run</button>
+        <button class="btn" id="reset" disabled title="Clear all arguments for this tool">Reset</button>
+        <span class="hint" id="runHint"><kbd>⌘</kbd><kbd>↵</kbd> runs from anywhere</span>
+      </div>
+    </section>
+
+    <section class="pane">
+      <div class="panebar">
+        <h3>Output</h3>
+        <span id="meta"></span>
+        <span style="flex:1"></span>
+        <div class="tabs" role="tablist" id="outTabs">
+          <button class="tab" role="tab" data-view="tree" aria-selected="true">Tree</button>
+          <button class="tab" role="tab" data-view="table" aria-selected="false">Table</button>
+          <button class="tab" role="tab" data-view="text" aria-selected="false">Text</button>
+          <button class="tab" role="tab" data-view="raw" aria-selected="false">Raw</button>
+          <button class="tab" role="tab" data-view="diff" aria-selected="false" hidden>Diff</button>
+        </div>
+      </div>
+      <div class="panebar" style="min-height:0;padding-block:6px">
+        <input id="outFilter" class="input" style="flex:1;min-width:140px;padding:3px 8px" placeholder="Filter output by key or value" aria-label="Filter output" autocomplete="off">
+        <button class="btn sm" id="expandAll" title="Expand all">Expand</button>
+        <button class="btn sm" id="collapseAll" title="Collapse all">Collapse</button>
+        <button class="btn sm" id="copyOut">Copy JSON</button>
+      </div>
+      <div class="panebody" id="outBody"><div class="empty"><h4>No output yet</h4>Run the tool to see its result here. Past runs load from History.</div></div>
+    </section>
+  </div>
+
+  <section id="logDrawer" hidden>
+    <div class="panebar" style="min-height:0;padding-block:6px">
+      <h3>Server log</h3><span class="dim" style="font-size:12px;flex:1">request/response lines from serve.py, newest last</span>
+      <button class="btn sm" id="logClose">Close</button>
+    </div>
+    <div id="log"></div>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const h = (tag, props = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el[k] = v;
+    else if (k in el && k !== "list") el[k] = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  el.append(...kids.flat().filter((x) => x != null && x !== false));
+  return el;
+};
+const store = {
+  get: (k) => { try { return JSON.parse(localStorage.getItem("mcphub:" + k)); } catch { return null; } },
+  set: (k, v) => { try { v == null ? localStorage.removeItem("mcphub:" + k) : localStorage.setItem("mcphub:" + k, JSON.stringify(v)); } catch {} },
+};
+const toast = (msg) => {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove("show"), 1400);
+};
+const copy = async (text, what = "Copied") => {
+  try { await navigator.clipboard.writeText(text); toast(what); } catch { toast("Copy failed"); }
+};
+const short = (name) => name.replace(/^[^_]+__/, "");
+const ago = (t) => {
+  const s = (Date.now() - t) / 1000;
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(t).toLocaleDateString();
+};
+const fmtBytes = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+
+// Text with URLs turned into links, built as DOM so nothing is parsed as HTML.
+const URL_RE = /https?:\/\/[^\s"'<>)\]]+/g;
+const linkify = (text) => {
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    frag.append(text.slice(last, m.index), h("a", { href: m[0], target: "_blank", rel: "noopener" }, m[0]));
+    last = m.index + m[0].length;
+  }
+  frag.append(text.slice(last));
+  return frag;
+};
+
+// Python docstrings arrive indented; strip the common indent so they read as prose.
+const dedent = (s) => {
+  const lines = (s || "").replace(/\t/g, "    ").split("\n");
+  const ind = Math.min(...lines.filter((l) => l.trim()).map((l) => l.match(/^ */)[0].length), 99);
+  return lines.map((l) => l.slice(ind)).join("\n").trim();
+};
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// ponytail: markdown-lite (code, bold, links) - enough for tool docstrings, not a markdown engine
+const mdLite = (s) => esc(s)
+  .replace(/``([^`]+)``|`([^`]+)`/g, (_, a, b) => `<code>${a || b}</code>`)
+  .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+  .replace(URL_RE, (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+const firstLine = (s) => (dedent(s).split(/\n\s*\n/)[0] || "").replace(/[`*]/g, "").replace(/\s+/g, " ").slice(0, 200);
+console.assert(dedent("\n    a\n      b\n    ") === "a\n  b", "dedent");
+
+// ---------------------------------------------------------------- schema
+// Pydantic emits Optional[X] as anyOf:[X, null] and nested models as $ref; flatten both.
+const norm = (p = {}, defs = {}) => {
+  if (p.$ref) { const { $ref, ...rest } = p; p = { ...(defs[$ref.split("/").pop()] || {}), ...rest }; }
+  let nullable = false;
+  if (p.anyOf) {
+    const { anyOf, ...rest } = p;
+    const non = anyOf.filter((x) => x.type !== "null");
+    nullable = non.length < anyOf.length;
+    if (non.length === 1) p = { ...norm(non[0], defs), ...rest };
+  }
+  return { ...p, nullable };
+};
+const PRIM = ["string", "integer", "number"];
+const kindOf = (p) => {
+  if (p.enum) return "enum";
+  if (p.type === "boolean") return "bool";
+  if (p.type === "integer" || p.type === "number") return "number";
+  if (p.type === "string") return "string";
+  if (p.type === "array" && PRIM.includes(p.items?.type) && !p.items?.enum) return "list";
+  return "json";
+};
+const typeLabel = (p) => {
+  let t = p.enum ? "enum" : p.type === "array" ? `${p.items?.type || "any"}[]` : p.type || (p.anyOf ? "union" : "any");
+  if (p.nullable) t += " | null";
+  const lim = [p.minimum != null && `≥${p.minimum}`, p.maximum != null && `≤${p.maximum}`, p.maxLength && `max ${p.maxLength} chars`].filter(Boolean);
+  return lim.length ? `${t} (${lim.join(", ")})` : t;
+};
+// A skeleton value for JSON-typed fields, so nested object shapes are visible.
+const sample = (p, defs, depth = 0) => {
+  p = norm(p, defs);
+  if (p.default !== undefined) return p.default;
+  if (p.enum) return p.enum[0];
+  if (depth > 3) return null;
+  if (p.type === "object" || p.properties) {
+    return Object.fromEntries(Object.entries(p.properties || {}).map(([k, v]) => [k, sample(v, defs, depth + 1)]));
+  }
+  if (p.type === "array") return p.items ? [sample(p.items, defs, depth + 1)] : [];
+  return { string: "", number: 0, integer: 0, boolean: false }[p.type] ?? null;
+};
+
+// ---------------------------------------------------------------- state
+const S = {
+  servers: [], server: "", tools: [], toolCache: {}, tool: null, args: {},
+  side: "tools", inMode: "form", view: "tree", history: [], out: null, running: null, armed: false, logOpen: false,
+};
+const draftKey = () => `draft:${S.server}/${S.tool?.name}`;
+const saveDraft = () => { if (!S.tool) return; store.set(draftKey(), Object.keys(S.args).length ? S.args : null); syncHash(); };
+// The URL always holds server, tool and args, so any call can be bookmarked or shared.
+const hashFor = () => {
+  if (!S.tool) return `#/${encodeURIComponent(S.server)}`;
+  const base = `#/${encodeURIComponent(S.server)}/${encodeURIComponent(short(S.tool.name))}`;
+  return Object.keys(S.args).length ? `${base}?args=${encodeURIComponent(JSON.stringify(S.args))}` : base;
+};
+const syncHash = () => { if (location.hash !== hashFor()) history.replaceState(null, "", hashFor()); };
+
+// ---------------------------------------------------------------- sidebar
+const annBadges = (t) => {
+  const a = t.annotations || {};
+  return [a.readOnlyHint && h("span", { class: "badge ro", title: "readOnlyHint: does not change anything" }, "read-only"),
+          a.destructiveHint && !a.readOnlyHint && h("span", { class: "badge destructive", title: "destructiveHint: may change or delete data" }, "destructive")];
+};
+const mark = (text, q) => {
+  const i = q ? text.toLowerCase().indexOf(q) : -1;
+  return i < 0 ? [text] : [text.slice(0, i), h("mark", {}, text.slice(i, i + q.length)), text.slice(i + q.length)];
+};
+const visibleTools = () => {
+  const q = $("filter").value.trim().toLowerCase();
+  if (!q) return S.tools;
+  const inName = S.tools.filter((t) => short(t.name).toLowerCase().includes(q));
+  const inDesc = S.tools.filter((t) => !inName.includes(t) && (t.description || "").toLowerCase().includes(q));
+  return [...inName, ...inDesc];
+};
+const renderList = () => {
+  const list = $("list"), q = $("filter").value.trim().toLowerCase();
+  list.innerHTML = "";
+  if (S.side === "history") return renderSideHistory(q);
+  if (S.toolsError) return list.append(h("div", { class: "listnote bad" }, linkify(S.toolsError)));
+  if (S.toolsLoading) return list.append(...[70, 55, 80, 60, 75].map((w) => h("div", { style: "padding:6px 8px" }, h("div", { class: "skel", style: `width:${w}%;margin:0 0 6px` }), h("div", { class: "skel", style: `width:${w + 15}%;height:9px;margin:0` }))));
+  const vis = visibleTools();
+  $("toolCount").textContent = q ? `${vis.length} of ${S.tools.length} tools` : `${S.tools.length} tools`;
+  if (!vis.length) return list.append(h("div", { class: "listnote" }, `No tool matches "${q}".`));
+  for (const t of vis) {
+    list.append(h("button", {
+      class: "tool", role: "option", "aria-selected": String(t === S.tool), title: short(t.name),
+      onclick: () => selectTool(t),
+    }, h("span", { class: "tname" }, mark(short(t.name), q)), h("span", {}, annBadges(t)),
+       h("span", { class: "tsub" }, firstLine(t.description) || "No description")));
+  }
+  list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+};
+const renderSideHistory = (q) => {
+  const list = $("list");
+  const rows = S.history.filter((e) => !q || `${e.tool} ${e.server} ${JSON.stringify(e.args)}`.toLowerCase().includes(q));
+  $("toolCount").textContent = q ? `${rows.length} of ${S.history.length} runs` : `${S.history.length} runs`;
+  if (!rows.length) return list.append(h("div", { class: "listnote" }, q ? `No run matches "${q}".` : "No runs yet. Every run is saved here."));
+  for (const e of rows) {
+    list.append(h("button", { class: "hrow", onclick: () => openHistory(e), title: new Date(e.t).toLocaleString() },
+      h("span", { class: "dot" + (e.failed ? " err" : "") }),
+      h("span", { class: "htool" }, short(e.tool)),
+      h("span", { class: "hargs" }, JSON.stringify(e.args)),
+      h("span", { class: "htime" }, `${e.server} · ${ago(e.t)}`)));
+  }
+};
+const sideFilter = { tools: "", history: "" };
+const setSide = (side) => {
+  sideFilter[S.side] = $("filter").value; $("filter").value = sideFilter[side];
+  S.side = side;
+  document.querySelectorAll("[data-side]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.side === side)));
+  $("filter").placeholder = side === "tools" ? "Search tools" : "Search history";
+  renderList();
+};
+document.querySelectorAll("[data-side]").forEach((b) => (b.onclick = () => setSide(b.dataset.side)));
+
+// ---------------------------------------------------------------- server + tool selection
+// Findings from actually driving the API through this app via chrome-devtools-mcp
+// (2026-09-09) - not paraphrased off the Slack announcement, verified live.
+const CONTEXT_TEACHING = `\
+1. capabilities embeds the full request schema for both POST endpoints, verbatim -
+   down to the source docstring on domain_ids / conversation_id / caller semantics
+   (see result.filters in a capabilities call). That's more than the announcement
+   shows and it can't drift from the code, so read it before any external doc.
+
+2. /domains ranks ALL 181 domains, not just searchable ones. considered[] included
+   is_searchable:false entries (suppliers_hub, user_success ranked #4/#5 for a
+   restaurants query) - routing doesn't filter by searchability, retrieval does.
+   rank is the domain's absolute position across all 181, not a 0..limit-1 index:
+   a limit:3 response showed ranks 1, 3, 4.
+
+3. DOMAIN_NOT_SEARCHABLE is real and reproducible. domain_ids:["ab_test"] (capabilities
+   marks it is_searchable:false) -> transport 200, statusCode 400, body:
+   {"success":false,"error":"Domain(s) have no published content to search: ab_test",
+   "error_type":"DOMAIN_NOT_SEARCHABLE"}. This app's context_call() correctly
+   surfaced it as isError despite the 200 - confirms the statusCode/body gotcha
+   is real and the decode here is right.
+
+4. Table names really do only arrive as prose. A KPI hit's content reads like:
+   "...Sources: prod.rest.monthly_churn (Readiness status.); prod.rest.restaurants_gpv_dim
+   (Order volume.)." No structured table field exists in the response.
+
+5. include_answer:true is genuinely grounded, not a rubber stamp. Live model was
+   accounts/fireworks/models/deepseek-v4-flash-0731. It cited only 1 of 5 retrieved
+   chunks (chunks_used:5) and explicitly said what was MISSING from context rather
+   than guessing - cited_doc_ids is a real subset of what it was given, not all of it.
+
+6. A vague query did not trigger the documented "clarification" response. Tried
+   "how is it going" expecting it - still routed normally (server_routed,
+   multi_domain, 3 domains selected, top confidence only 0.79). Clarification
+   exists per the docs but isn't as simple as "ask something vague" - didn't
+   reproduce it in one try.`;
+
+const loadServer = async (server, toolName, hashArgs) => {
+  S.server = server; $("server").value = server;
+  $("teachBox").hidden = server !== "context-search"; $("teach").textContent = CONTEXT_TEACHING;
+  // Stale-while-revalidate: show the last known tool list at once, refresh it in the background.
+  const cached = S.toolCache[server] || store.get("tools:" + server);
+  S.tools = cached || []; S.toolsError = null; S.toolsLoading = !cached;
+  // The main pane must always show a tool of the selected server (or nothing).
+  if (S.tool && S.toolServer !== server) resetMain();
+  const pick = () => {
+    const name = toolName ?? (S.tool && S.tool.name);
+    const t = S.tools.find((x) => x.name === name || short(x.name) === name);
+    // Same tool re-fetched: swap the object quietly, so a refresh never clobbers what the user is typing.
+    if (t && S.tool?.name !== t.name) { selectTool(t, { args: hashArgs }); hashArgs = undefined; }
+    else { if (t) S.tool = t; renderList(); }
+  };
+  pick();
+  if (S.toolCache[server]) return;
+  const refresh = (async () => {
+    try {
+      const r = await fetch(`/api/tools?server=${encodeURIComponent(server)}`).then((r) => r.json());
+      if (r.error) throw new Error(typeof r.error === "string" ? r.error : r.error.data || r.error.message || JSON.stringify(r.error));
+      S.toolCache[server] = r.result.tools; store.set("tools:" + server, r.result.tools);
+      if (S.server !== server) return;  // user switched again while this loaded
+      S.tools = r.result.tools; S.toolsError = null;
+    } catch (e) {
+      if (S.server === server && !cached) S.toolsError = `Could not list tools for ${server}:\n${e.message}`;
+    }
+    if (S.server !== server) return;
+    S.toolsLoading = false; pick();
+  })();
+  if (!cached) await refresh;
+};
+
+const selectTool = (t, { args, out } = {}) => {
+  S.tool = t; S.toolServer = S.server; S.armed = null;
+  S.args = args ?? store.get(draftKey()) ?? {};
+  S.jsonInvalid = false;
+  syncHash();
+  document.title = `${short(t.name)} · MCP Hub`;
+  $("name").className = ""; $("name").textContent = short(t.name); $("name").title = t.name;
+  $("badges").replaceChildren(...annBadges(t).filter(Boolean));
+  const d = dedent(t.description);
+  $("desc").innerHTML = mdLite(d) || '<span class="dim">No description.</span>';
+  $("desc").classList.add("clamp");
+  requestAnimationFrame(() => {
+    const over = $("desc").scrollHeight > $("desc").clientHeight + 4;
+    $("descMore").hidden = !over; if (!over) $("desc").classList.remove("clamp");
+    $("descMore").textContent = "Show full description";
+  });
+  $("run").disabled = $("reset").disabled = false; $("copyCurl").hidden = false;
+  // Show the latest saved output for this tool, so outputs can be explored without re-running.
+  $("outFilter").value = ""; S.cmp = null;
+  // Only show a saved output that was made with the args now in the input, so it never reads as "this call failed".
+  const same = JSON.stringify(S.args);
+  const last = S.history.find((e) => e.server === S.server && e.tool === t.name && JSON.stringify(e.args) === same);
+  if (out) setOut(out);
+  else if (last) setOut({ value: last.result, failed: last.failed, t: last.t, ms: last.ms, fromHistory: true, args: last.args });
+  else setOut(null);
+  renderInput(); renderRunButton(); renderExamples();
+  renderList();
+};
+$("descMore").onclick = () => {
+  const c = $("desc").classList.toggle("clamp");
+  $("descMore").textContent = c ? "Show full description" : "Show less";
+};
+
+// JSON objects written after "Example" in a description, plus schema-level examples: one click loads them.
+const findExamples = (t) => {
+  const text = t.description || "", found = [];
+  for (const m of text.matchAll(/example/gi)) {
+    const start = text.indexOf("{", m.index);
+    if (start < 0 || start - m.index > 40) continue;
+    let depth = 0, str = false;
+    for (let i = start; i < text.length; i++) {
+      const c = text[i];
+      if (str) { if (c === "\\") i++; else if (c === '"') str = false; continue; }
+      if (c === '"') str = true; else if (c === "{") depth++;
+      else if (c === "}" && !--depth) { try { const o = JSON.parse(text.slice(start, i + 1)); if (o && typeof o === "object" && !Array.isArray(o)) found.push(o); } catch {} break; }
+    }
+  }
+  for (const ex of t.inputSchema?.examples || []) if (ex && typeof ex === "object") found.push(ex);
+  const seen = new Set();
+  return found.filter((o) => !seen.has(JSON.stringify(o)) && seen.add(JSON.stringify(o))).slice(0, 4);
+};
+console.assert(findExamples({ description: 'Example: {"query": "a {b}", "limit": 5} -> x' })[0]?.limit === 5, "findExamples");
+const renderExamples = () => {
+  const exs = S.tool ? findExamples(S.tool) : [];
+  $("examples").replaceChildren(...exs.map((ex, i) => h("button", { class: "btn sm", title: JSON.stringify(ex), onclick: () => {
+    S.args = structuredClone(ex); S.jsonInvalid = false; saveDraft(); renderInput(); renderRunButton(); toast("Example loaded into the input");
+  } }, exs.length > 1 ? `Use example ${i + 1}` : "Use example")));
+};
+
+// ---------------------------------------------------------------- input: form / json / schema
+const schemaInfo = () => {
+  const sc = S.tool?.inputSchema || {}, defs = sc.$defs || sc.definitions || {};
+  const props = Object.entries(sc.properties || {}).map(([k, p]) => [k, norm(p, defs)]);
+  const req = new Set(sc.required || []);
+  props.sort((a, b) => req.has(b[0]) - req.has(a[0]));
+  return { props, req, defs };
+};
+const renderInput = () => {
+  document.querySelectorAll("[data-in]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.in === S.inMode)));
+  const body = $("inBody"); body.innerHTML = "";
+  if (!S.tool) return;
+  const { props, req, defs } = schemaInfo();
+  $("paramInfo").textContent = props.length ? `${props.length} param${props.length > 1 ? "s" : ""}${req.size ? ` · ${req.size} required` : ""}` : "no params";
+  if (S.inMode === "json") return renderJson(body);
+  if (S.inMode === "schema") {
+    body.append(h("div", { class: "note" }, "Input schema"), h("div", { id: "schemaTree", class: "tree mono" }, jsonNode(S.tool.inputSchema || {}, 0, "", 3)));
+    if (S.tool.outputSchema) body.append(h("div", { class: "note", style: "margin-top:14px" }, "Output schema"), h("div", { class: "tree mono" }, jsonNode(S.tool.outputSchema, 0, "", 3)));
+    return;
+  }
+  if (!props.length) return body.append(h("div", { class: "empty" }, h("h4", {}, "No parameters"), "This tool takes no input. Press Run."));
+  for (const [k, p] of props) body.append(fieldEl(k, p, req.has(k), defs));
+  const extra = Object.keys(S.args).filter((k) => !props.some(([pk]) => pk === k));
+  if (extra.length) body.append(h("div", { class: "note" }, `Extra keys not in the schema: ${extra.join(", ")}. Edit them in JSON.`));
+  renderRecent(body);
+};
+
+const autoGrow = (ta) => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + 2 + "px"; };
+const fieldEl = (k, p, required, defs) => {
+  const kind = kindOf(p), v = S.args[k];
+  const id = "f-" + k;
+  const ph = p.default !== undefined && p.default !== null ? `default: ${JSON.stringify(p.default)}` : required ? "" : "optional";
+  const err = h("div", { class: "ferr", hidden: true });
+  const wrap = h("div", { class: "field" });
+  const setErr = (msg) => { err.hidden = !msg; err.textContent = msg || ""; wrap.classList.toggle("invalid", !!msg); };
+  const commit = (val) => {
+    if (val === undefined) delete S.args[k]; else S.args[k] = val;
+    setErr(checkValue(p, val) ? `Invalid: ${checkValue(p, val)}` : "");
+    saveDraft(); renderRunButton();
+  };
+  let ctl;
+  if (kind === "enum" || kind === "bool") {
+    const opts = kind === "bool" ? [true, false] : p.enum;
+    ctl = h("select", { id, onchange: () => commit(ctl.value === "" ? undefined : opts[+ctl.value]) },
+      h("option", { value: "" }, p.default !== undefined ? `(default: ${JSON.stringify(p.default)})` : "(not set)"),
+      opts.map((o, i) => h("option", { value: String(i), selected: v === o }, String(o))));
+  } else if (kind === "number") {
+    ctl = h("input", { id, class: "input mono", type: "number", placeholder: ph, value: v ?? "", min: p.minimum, max: p.maximum,
+      step: p.type === "integer" ? 1 : "any", oninput: () => commit(ctl.value === "" ? undefined : Number(ctl.value)) });
+  } else if (kind === "string") {
+    ctl = h("textarea", { id, class: "grow", rows: 1, placeholder: ph, spellcheck: false, value: v ?? "",
+      oninput: () => { autoGrow(ctl); commit(ctl.value === "" ? undefined : ctl.value); } });
+    requestAnimationFrame(() => autoGrow(ctl));
+  } else if (kind === "list") {
+    ctl = h("textarea", { id, rows: 3, placeholder: "one value per line", spellcheck: false, value: Array.isArray(v) ? v.join("\n") : "",
+      oninput: () => {
+        const items = ctl.value.split("\n").map((s) => s.trim()).filter(Boolean);
+        commit(items.length ? items.map((s) => (p.items.type === "string" ? s : Number(s))) : undefined);
+      } });
+  } else {
+    const skel = JSON.stringify(sample(p, defs), null, 2);
+    ctl = h("textarea", { id, rows: Math.min(10, skel.split("\n").length + 1), spellcheck: false, placeholder: skel,
+      value: v === undefined ? "" : JSON.stringify(v, null, 2),
+      oninput: () => {
+        if (!ctl.value.trim()) { setErr(""); return commit(undefined); }
+        try { commit(JSON.parse(ctl.value)); setErr(""); } catch (e) { setErr("Invalid JSON: " + e.message); }
+      } });
+  }
+  const labelKids = [h("span", { class: "fname" }, k), h("span", { class: "ftype" }, typeLabel(p)), required && h("span", { class: "req" }, "required")];
+  if (kind === "json") labelKids.push(h("button", { class: "linkbtn", type: "button", onclick: () => { ctl.value = JSON.stringify(sample(p, defs), null, 2); ctl.oninput(); } }, "insert example"));
+  wrap.dataset.key = k;
+  wrap.append(h("label", { htmlFor: id }, labelKids), ctl, err);
+  const bad = checkValue(p, v);
+  if (bad) setErr(`Current value is invalid: ${bad}. Type a new value here, or fix it in JSON.`);
+  const desc = dedent(p.description || (p.title && p.title.toLowerCase() !== k.replace(/_/g, " ") ? p.title : ""));
+  if (desc) wrap.append(h("div", { class: "fdesc" }, linkify(desc)));
+  return wrap;
+};
+
+const renderJson = (body) => {
+  const ta = h("textarea", { id: "jsonArgs", spellcheck: false, style: "min-height:260px;height:100%", value: JSON.stringify(S.args, null, 2) });
+  const err = h("div", { id: "jsonerr" });
+  ta.oninput = () => {
+    try {
+      const v = JSON.parse(ta.value || "{}");
+      if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("arguments must be a JSON object");
+      S.args = v; err.textContent = ""; saveDraft(); renderRunButton();
+    } catch (e) { err.textContent = e.message; S.jsonInvalid = true; S.jsonError = e.message; renderRunButton(); return; }
+    S.jsonInvalid = false; S.jsonError = "";
+  };
+  body.append(ta, err, h("div", { class: "note", style: "margin-top:8px" }, "Form and JSON edit the same arguments."));
+  renderRecent(body);
+};
+
+// Past runs of this tool: one click restores its args and output.
+const renderRecent = (body) => {
+  const rows = S.history.filter((e) => e.server === S.server && e.tool === S.tool.name).slice(0, 8);
+  if (!rows.length) return;
+  body.append(h("div", { class: "recent" }, h("h4", {}, "Recent runs ", h("span", { style: "font-weight:400" }, "- click to restore, Diff to compare with the output shown")), rows.map((e) =>
+    h("div", { class: "hline" },
+      h("button", { class: "hrow", onclick: () => openHistory(e), title: `Restore these arguments and output (${new Date(e.t).toLocaleString()})` },
+        h("span", { class: "dot" + (e.failed ? " err" : "") }), h("span", { class: "hargs" }, JSON.stringify(e.args)), h("span", { class: "htime" }, ago(e.t))),
+      h("button", { class: "btn sm", title: "Compare this run's output with the output shown now", disabled: !S.out || S.out.t === e.t,
+        onclick: () => { S.cmp = e; setView("diff"); } }, "Diff")))));
+};
+
+document.querySelectorAll("[data-in]").forEach((b) => (b.onclick = () => {
+  if (S.inMode === "json" && S.jsonInvalid) return toast("Fix the JSON first");
+  S.inMode = b.dataset.in; store.set("inMode", S.inMode); renderInput();
+}));
+
+// Value vs schema type, so a wrong type is caught before the call instead of as a server error.
+const checkValue = (p, v) => {
+  if (v === undefined || (v === null && p.nullable)) return "";
+  const got = Array.isArray(v) ? "array" : v === null ? "null" : typeof v;
+  const want = (ok, label) => (ok ? "" : `expected ${label}, got ${got} ${JSON.stringify(v).slice(0, 40)}`);
+  if (p.enum) return want(p.enum.includes(v), `one of ${p.enum.map((x) => JSON.stringify(x)).join(", ")}`);
+  switch (p.type) {
+    case "integer": return want(Number.isInteger(v), "integer");
+    case "number": return want(typeof v === "number", "number");
+    case "string": return want(typeof v === "string", "string");
+    case "boolean": return want(typeof v === "boolean", "boolean");
+    case "array": return want(Array.isArray(v), "array") ||
+      (PRIM.includes(p.items?.type) ? v.map((x, i) => checkValue(p.items, x) && `item ${i}: ${checkValue(p.items, x)}`).find(Boolean) || "" : "");
+    case "object": return want(got === "object", "object");
+    default: return "";
+  }
+};
+console.assert(checkValue({ type: "integer" }, "three").startsWith("expected integer") && !checkValue({ type: "integer" }, 3) && !checkValue({ type: "string", nullable: true }, null), "checkValue");
+const typeErrors = () => schemaInfo().props.map(([k, p]) => (checkValue(p, S.args[k]) ? `${k}: ${checkValue(p, S.args[k])}` : "")).filter(Boolean);
+const missingRequired = () => {
+  const { props, req } = schemaInfo();
+  return props.filter(([k]) => req.has(k) && (S.args[k] === undefined || S.args[k] === "")).map(([k]) => k);
+};
+const renderRunButton = () => {
+  const b = $("run");
+  if (S.running) { b.textContent = "Cancel"; b.className = "btn"; b.disabled = false; return; }
+  b.disabled = !S.tool;
+  b.className = S.armed === "destructive" ? "btn danger" : "btn primary";
+  b.textContent = S.armed === "destructive" ? "Confirm: run destructive tool" : S.armed === "types" ? "Run anyway" : "Run";
+  const miss = S.tool && !S.jsonInvalid ? missingRequired() : [];
+  const types = S.tool && !S.jsonInvalid ? typeErrors() : [];
+  $("runHint").innerHTML = S.jsonInvalid ? `<span class="bad">JSON is invalid: ${esc(S.jsonError || "")}</span>`
+    : miss.length ? `<span style="color:var(--warn)">Missing required: ${miss.map(esc).join(", ")}</span>`
+    : types.length ? `<span style="color:var(--warn)">Type mismatch: ${types.map(esc).join("; ")}</span>`
+    : S.armed === "destructive" ? "This tool may change data. Click again to run."
+    : "<kbd>⌘</kbd><kbd>↵</kbd> runs from anywhere";
+};
+$("reset").onclick = () => { S.args = {}; S.jsonInvalid = false; saveDraft(); renderInput(); renderRunButton(); };
+
+// ---------------------------------------------------------------- run
+const isTerminal = (r) =>
+  !r || typeof r !== "object" || "answer" in r || (r.status !== undefined && !["queued", "running"].includes(r.status));
+const hasResumeParam = (t) => "resume_from" in (t?.inputSchema?.properties || {});
+const resumeTool = (t) => hasResumeParam(t) ? t : (S.tools.find((x) => /job_status/i.test(x.name)) || t);
+console.assert(isTerminal({ answer: "x" }) && !isTerminal({ status: "running" }) && isTerminal({ status: "completed" }), "isTerminal");
+
+const run = async () => {
+  if (S.running) { S.running.abort(); return; }
+  if (!S.tool) return;
+  if (S.jsonInvalid) return toast("Fix the JSON first");
+  const miss = missingRequired();
+  if (miss.length) {
+    if (S.inMode !== "form") { S.inMode = "form"; renderInput(); }
+    for (const k of miss) {
+      const f = document.querySelector(`.field[data-key="${CSS.escape(k)}"]`);
+      f?.classList.add("invalid"); const e = f?.querySelector(".ferr"); if (e) { e.hidden = false; e.textContent = "Required"; }
+    }
+    document.getElementById("f-" + miss[0])?.focus();
+    return;
+  }
+  const a = S.tool.annotations || {};
+  const arm = (why) => {
+    S.armed = why; renderRunButton();
+    clearTimeout(run.disarm); run.disarm = setTimeout(() => { S.armed = null; renderRunButton(); }, 6000);
+  };
+  // Wrong types: the first click warns, a second click sends anyway (to see how the server reacts).
+  if (typeErrors().length && !S.armed) return arm("types");
+  if (a.destructiveHint && !a.readOnlyHint && S.armed !== "destructive") return arm("destructive");
+  S.armed = null;
+  const ctrl = (S.running = new AbortController());
+  renderRunButton();
+  const server = S.server, first = S.tool, args = structuredClone(S.args);
+  const t0 = performance.now(), progress = [];
+  const elapsed = () => performance.now() - t0;
+  const tick = setInterval(() => renderRunning(elapsed(), progress), 100);
+  renderRunning(0, progress);
+  let tool = first, callArgs = args, result, raw, failed = false;
+  try {
+    for (let hop = 0; hop < 50; hop++) {  // ponytail: hop cap against a runaway DORA job loop
+      const r = await fetch("/api/call", { method: "POST", signal: ctrl.signal, body: JSON.stringify({ server, tool: tool.name, args: callArgs }) })
+        .then((r) => r.json());
+      failed = !!(r.error || r.isError); result = r.error ?? r.result; raw = r.raw;
+      if (result && typeof result === "object" && Array.isArray(result.progress_log)) {
+        progress.push(...result.progress_log.map((p) => (typeof p === "string" ? p : JSON.stringify(p))));
+      }
+      if (failed || !(result && typeof result === "object" && "job_id" in result) || isTerminal(result)) break;
+      tool = resumeTool(tool);
+      callArgs = { job_id: result.job_id, resume_from: result.resume_from ?? null, user_query: "" };
+    }
+  } catch (e) {
+    failed = true;
+    result = e.name === "AbortError" ? "Cancelled in the browser. The server call may still finish; check History." : `Request failed: ${e.message}`;
+  }
+  clearInterval(tick);
+  S.running = null; renderRunButton();
+  const ms = Math.round(elapsed()), entry = { t: Date.now(), server, tool: first.name, args, result, failed, ms };
+  if (S.tool === first) {
+    setOut({ value: result, raw, failed, ms, t: entry.t, args });
+    // Stacked layout: bring the output into view, it sits below the form.
+    if (matchMedia("(max-width: 1100px)").matches) $("outBody").closest(".pane").scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+  else toast(`${short(first.name)} finished`);
+  if (!(typeof result === "string" && result.startsWith("Cancelled"))) {
+    try { await fetch("/api/history", { method: "POST", body: JSON.stringify(entry) }); } catch {}
+    S.history.unshift(entry);
+    if (S.side === "history") renderList();
+    if (S.tool === first && S.inMode !== "schema") renderInput();
+  }
+};
+$("run").onclick = run;
+
+const renderRunning = (ms, progress) => {
+  $("meta").replaceChildren(h("span", { class: "pill run" }, "running"), `${(ms / 1000).toFixed(1)}s`);
+  const body = $("outBody");
+  let pr = body.querySelector(".progress");
+  if (!pr) { body.replaceChildren(h("div", { class: "skel", style: "width:60%" }), h("div", { class: "skel", style: "width:85%" }), h("div", { class: "skel", style: "width:40%" }), (pr = h("div", { class: "progress" }))); }
+  pr.textContent = progress.join("\n");
+};
+
+// ---------------------------------------------------------------- output
+const setOut = (out) => {
+  S.out = out;
+  if (out) {
+    try { out.size = new Blob([typeof out.value === "string" ? out.value : JSON.stringify(out.value)]).size; } catch { out.size = 0; }
+    out.tables = findTables(out.value);
+    out.texts = findTexts(out.value);
+    // Pick the view that shows this output best, unless the user chose one.
+    const pref = S.cmp ? "diff" : store.get("view");
+    S.view = pref && (pref !== "table" || out.tables.length) ? pref : typeof out.value === "string" ? "text" : "tree";
+  }
+  renderOut();
+};
+const setView = (v) => { S.view = v; if (v !== "diff") store.set("view", v); renderOut(); };
+document.querySelectorAll("[data-view]").forEach((b) => (b.onclick = () => setView(b.dataset.view)));
+
+// Pull a human message out of the common error shapes.
+const errorMessage = (v) => {
+  if (typeof v === "string") return v;
+  if (!v || typeof v !== "object") return String(v);
+  const e = v.error ?? v;
+  if (typeof e === "string") return e;
+  return e.message || e.detail || e.error || (typeof e.data === "string" ? e.data : "") || v.message || "";
+};
+const authHint = (msg) => /sign.?in|login|expired|401|403|unauthori/i.test(msg)
+  ? "Auth problem. Open the login link above, or run `mcp-s-cli login` in a terminal, then run again." : "";
+
+// Arrays of objects anywhere in the first 3 levels: these become Table view choices.
+const findTables = (v) => {
+  const found = [];
+  const walk = (x, path, d) => {
+    if (d > 3 || !x || typeof x !== "object") return;
+    if (Array.isArray(x)) {
+      if (x.length && x.filter((r) => r && typeof r === "object" && !Array.isArray(r)).length >= x.length / 2) found.push({ path: path || "(root)", rows: x });
+      else if (x.length && x.every((r) => r === null || typeof r !== "object")) found.push({ path: path || "(root)", rows: x.map((value) => ({ value })) });
+      x.slice(0, 3).forEach((r, i) => walk(r, `${path}[${i}]`, d + 1));
+    } else for (const [k, val] of Object.entries(x)) walk(val, path ? `${path}.${k}` : k, d + 1);
+  };
+  walk(v, "", 0);
+  const depth = (p) => (p.match(/[.[]/g) || []).length;
+  return found.sort((a, b) => depth(a.path) - depth(b.path) || b.rows.length - a.rows.length);
+};
+// Long or multi-line strings: the answer / markdown / SQL a tool returns, readable in Text view.
+const findTexts = (v) => {
+  const found = [];
+  const walk = (x, path) => {
+    if (found.length > 50) return;
+    if (typeof x === "string") { if (x.length > 60 || x.includes("\n")) found.push({ path: path || "(root)", text: x }); }
+    else if (Array.isArray(x)) x.forEach((r, i) => walk(r, `${path}[${i}]`));
+    else if (x && typeof x === "object") for (const [k, val] of Object.entries(x)) walk(val, path ? `${path}.${k}` : k);
+  };
+  walk(v, "");
+  return found;
+};
+
+// Keep only the branches whose key or value contains q.
+const prune = (v, q) => {
+  const hit = (s) => String(s).toLowerCase().includes(q);
+  if (v === null || typeof v !== "object") return hit(v) ? v : undefined;
+  const entries = Array.isArray(v) ? v.map((x, i) => [i, x]) : Object.entries(v);
+  const kept = [];
+  for (const [k, x] of entries) {
+    if (!Array.isArray(v) && hit(k)) kept.push([k, x]);
+    else { const p = prune(x, q); if (p !== undefined) kept.push([k, p]); }
+  }
+  if (!kept.length) return undefined;
+  return Array.isArray(v) ? Object.assign(kept.map(([, x]) => x), { __idx: kept.map(([k]) => k) }) : Object.fromEntries(kept);
+};
+{ const p = prune({ a: { b: "restaurants", c: "x" }, d: [1, "rest"] }, "rest");
+  console.assert(JSON.stringify(p) === '{"a":{"b":"restaurants"},"d":["rest"]}' && p.d.__idx[0] === 1, "prune"); }
+
+const hlText = (text, q) => {
+  if (!q) return linkify(text);
+  const frag = document.createDocumentFragment(), low = text.toLowerCase();
+  let i = 0, j;
+  while ((j = low.indexOf(q, i)) >= 0) { frag.append(text.slice(i, j), h("span", { class: "hl" }, text.slice(j, j + q.length))); i = j + q.length; }
+  frag.append(text.slice(i));
+  return frag;
+};
+// Click copies a value, unless the user is selecting text or clicking a link.
+const copyValue = (e, v) => {
+  if (e.target.closest("a") || String(getSelection())) return;
+  copy(typeof v === "string" ? v : JSON.stringify(v), "Copied value");
+};
+const preview = (v) => {
+  if (Array.isArray(v)) return `[${v.length} item${v.length === 1 ? "" : "s"}]`;
+  const keys = Object.keys(v);
+  return `{ ${keys.slice(0, 4).join(", ")}${keys.length > 4 ? `, … +${keys.length - 4}` : ""} }`;
+};
+const pathOf = (base, k, isArr) => isArr ? `${base}[${k}]` : /^[A-Za-z_$][\w$]*$/.test(k) ? (base ? `${base}.${k}` : k) : `${base}[${JSON.stringify(k)}]`;
+// Collapsible tree. Clicking a key copies its path (e.g. domains[0].id) - handy for writing follow-up args.
+const jsonNode = (v, depth, path, openDepth, q = "") => {
+  const leaf = (cls, ...kids) => h("span", { class: cls + " val", title: "Click to copy value", onclick: (e) => copyValue(e, v) }, ...kids);
+  if (v === null || v === undefined) return leaf("b", "null");
+  if (typeof v === "string") {
+    return v.includes("\n") || v.length > 160 ? leaf("sblock", hlText(v, q)) : leaf("s", '"', hlText(v, q), '"');
+  }
+  if (typeof v !== "object") return leaf(typeof v === "boolean" ? "b" : "n", hlText(String(v), q));
+  const isArr = Array.isArray(v), keys = isArr ? v.map((_, i) => i) : Object.keys(v);
+  if (!keys.length) return h("span", { class: "prev" }, isArr ? "[]" : "{}");
+  const kids = h("div", { class: "kids" });
+  const fill = () => {
+    for (const i of keys) {
+      const k = isArr && v.__idx ? v.__idx[i] : i, child = v[i], p = pathOf(path, k, isArr);
+      const keyEl = h("span", { class: "k", title: `Click to copy path: ${p}`, onclick: (e) => { e.preventDefault(); e.stopPropagation(); copy(p, `Copied path ${p}`); } },
+        isArr ? String(k) : hlText(String(k), q));
+      if (child && typeof child === "object" && Object.keys(child).length) {
+        const node = jsonNode(child, depth + 1, p, openDepth, q);
+        node.querySelector("summary").prepend(keyEl, ": ");
+        kids.append(node);
+      } else kids.append(h("div", { class: "row" }, keyEl, ": ", jsonNode(child, depth + 1, p, openDepth, q)));
+    }
+  };
+  // Big arrays below the root start closed, so the top-level shape is visible at a glance.
+  const open = q ? true : depth < openDepth && !(depth > 0 && isArr && keys.length > 5);
+  const det = h("details", { open }, h("summary", {}, h("span", { class: "prev" }, preview(v))), kids);
+  // Build children lazily, so huge outputs render fast until expanded.
+  if (det.open) fill(); else det.addEventListener("toggle", () => { if (det.open && !kids.childElementCount) fill(); }, { once: false });
+  return det;
+};
+const countNodes = (v, cap = 400) => { let n = 0; const w = (x) => { if (n > cap) return; n++; if (x && typeof x === "object") Object.values(x).forEach(w); }; w(v); return n; };
+
+const renderOut = () => {
+  const body = $("outBody"), out = S.out, q = $("outFilter").value.trim().toLowerCase();
+  if (S.view === "diff" && !S.cmp) S.view = "tree";
+  document.querySelector('[data-view="diff"]').hidden = !S.cmp;
+  for (const id of ["outFilter", "expandAll", "collapseAll", "copyOut"]) $(id).disabled = !out;
+  document.querySelectorAll("[data-view]").forEach((b) => {
+    b.setAttribute("aria-selected", String(b.dataset.view === S.view));
+    b.disabled = !out || (b.dataset.view === "table" && !out.tables.length) || (b.dataset.view === "text" && !out.texts.length);
+  });
+  if (!out) {
+    $("meta").textContent = "";
+    body.replaceChildren(h("div", { class: "empty" }, h("h4", {}, "No output yet"),
+      S.tool ? ["No saved run for these args yet. Press ", h("b", {}, "Run"), ". Each run is saved to History and listed under Recent runs."] : "Pick a tool, then run it."));
+    return;
+  }
+  $("meta").replaceChildren(
+    h("span", { class: "pill " + (out.failed ? "err" : "ok") }, out.failed ? "error" : "ok"),
+    [out.ms != null && `${(out.ms / 1000).toFixed(2)}s`, fmtBytes(out.size)].filter(Boolean).join(" · "),
+    out.fromHistory ? h("span", { title: new Date(out.t).toLocaleString() }, `· saved run, ${ago(out.t)}`) : "",
+    out.args && JSON.stringify(out.args) !== JSON.stringify(S.args)
+      ? h("button", { class: "linkbtn", title: JSON.stringify(out.args), onclick: () => { S.args = structuredClone(out.args); saveDraft(); renderInput(); renderRunButton(); renderOut(); } }, "· load its args") : "");
+  body.innerHTML = "";
+  if (out.failed) {
+    const msg = errorMessage(out.value), fix = authHint(msg);
+    body.append(h("div", { class: "banner" }, h("strong", {}, "The call returned an error"), linkify(msg || "No message. See the tree below."), fix && h("div", { class: "fix" }, fix)));
+  }
+  let v = out.value;
+  if (q && S.view !== "raw" && S.view !== "table") {
+    v = prune(v, q);
+    if (v === undefined) return body.append(h("div", { class: "note" }, `The output filter "${q}" hides everything. `, clearFilterBtn()));
+  }
+  if (S.view === "raw") {
+    body.append(h("pre", { class: "raw mono" }, hlText(typeof v === "string" ? v : JSON.stringify(v, null, 2), q)));
+    if (out.raw) body.append(h("details", { style: "margin-top:12px" }, h("summary", { class: "dim" }, "MCP envelope before unwrap"), h("pre", { class: "raw mono" }, JSON.stringify(out.raw, null, 2))));
+    return;
+  }
+  if (S.view === "table") return renderTable(body, q);
+  if (S.view === "diff") return renderDiff(body, q);
+  if (S.view === "text") {
+    const texts = q ? findTexts(v) : out.texts;
+    if (!texts.length) body.append(h("div", { class: "note" }, "No long text in this output."));
+    for (const t of texts) body.append(h("div", { class: "textblock" }, h("div", { class: "path mono" }, t.path), h("div", { class: "body" }, hlText(t.text, q))));
+    return;
+  }
+  const openDepth = q || countNodes(v) < 300 ? 99 : 2;
+  const tree = h("div", { class: "tree", id: "out" });
+  tree.append(v && typeof v === "object" ? jsonNode(v, 0, "", openDepth, q) : jsonNode(v, 0, "", openDepth, q));
+  body.append(tree);
+};
+
+// Leaf-level diff of two outputs, keyed by path.
+const flatten = (v, path = "", out = new Map()) => {
+  if (out.size > 20000) return out;
+  if (v && typeof v === "object" && Object.keys(v).length) {
+    for (const [k, x] of Object.entries(v)) flatten(x, pathOf(path, Array.isArray(v) ? k : k, Array.isArray(v)), out);
+  } else out.set(path || "(root)", JSON.stringify(v));
+  return out;
+};
+const renderDiff = (body, q) => {
+  const c = S.cmp;
+  if (!c) return body.append(h("div", { class: "note" }, "Pick a run under Recent runs and press Diff."));
+  const a = flatten(c.result), b = flatten(S.out.value), lines = [];
+  for (const [k, x] of a) if (!b.has(k)) lines.push(["del", `- ${k}: ${x}`]); else if (b.get(k) !== x) lines.push(["chg", `~ ${k}: ${x}  →  ${b.get(k)}`]);
+  for (const [k, y] of b) if (!a.has(k)) lines.push(["add", `+ ${k}: ${y}`]);
+  const shown = q ? lines.filter(([, l]) => l.toLowerCase().includes(q)) : lines;
+  body.append(h("div", { class: "note" }, `Run from ${ago(c.t)} `, h("code", {}, JSON.stringify(c.args).slice(0, 120)), " → output shown now. ",
+    `${lines.length} difference${lines.length === 1 ? "" : "s"}. `, h("button", { class: "linkbtn", onclick: () => { S.cmp = null; setView("tree"); } }, "Stop comparing")));
+  if (!lines.length) return body.append(h("div", { class: "note good" }, "The outputs are identical."));
+  body.append(h("div", { class: "diff mono" }, shown.slice(0, 2000).map(([cls, l]) => h("div", { class: "ln " + cls }, hlText(l.length > 600 ? l.slice(0, 600) + "…" : l, q)))));
+};
+const renderTable = (body, q) => {
+  const out = S.out, idx = Math.min(out.tableIdx || 0, out.tables.length - 1), tb = out.tables[idx];
+  const pick = h("select", { style: "width:auto;padding:2px 6px;font-size:12px", onchange: () => { out.tableIdx = +pick.value; renderOut(); } },
+    out.tables.map((t, i) => h("option", { value: i, selected: i === idx }, `${t.path} (${t.rows.length} rows)`)));
+  let rows = tb.rows.map((r, i) => [i, r]);
+  if (q) rows = rows.filter(([, r]) => JSON.stringify(r).toLowerCase().includes(q));
+  const cols = [...new Set(tb.rows.slice(0, 100).flatMap((r) => (r && typeof r === "object" ? Object.keys(r) : [])))];
+  const sort = out.sort?.path === tb.path ? out.sort : null;
+  if (sort) {
+    const val = (r) => r?.[sort.col];
+    rows.sort(([, a], [, b]) => {
+      const x = val(a), y = val(b);
+      if (x == null) return 1; if (y == null) return -1;
+      const c = typeof x === "number" && typeof y === "number" ? x - y : String(typeof x === "object" ? JSON.stringify(x) : x).localeCompare(String(typeof y === "object" ? JSON.stringify(y) : y), undefined, { numeric: true });
+      return sort.dir * c;
+    });
+  }
+  const wrap = !!store.get("wrapCells");
+  const cell = (x) => {
+    const copyIt = (e) => copyValue(e, x);
+    if (x === null || x === undefined) return h("td", { class: "dim", onclick: copyIt }, "—");
+    if (typeof x === "number") return h("td", { class: "num", onclick: copyIt }, String(x));
+    const s = typeof x === "string" ? x : JSON.stringify(x);
+    return h("td", { class: wrap ? "wrap" : "", title: s.length > 40 ? s.slice(0, 2000) : null, onclick: copyIt }, hlText(!wrap && s.length > 300 ? s.slice(0, 300) + "…" : s, q));
+  };
+  const th = (c) => h("th", { class: "sortable", title: "Click to sort", onclick: () => {
+    out.sort = { path: tb.path, col: c, dir: sort?.col === c ? -sort.dir : 1 }; renderOut();
+  } }, c, sort?.col === c ? (sort.dir > 0 ? " ▲" : " ▼") : "");
+  body.append(h("div", { class: "note", style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap" }, "Array:", pick,
+      h("label", { style: "display:flex;gap:4px;align-items:center;cursor:pointer" },
+        h("input", { type: "checkbox", checked: wrap, onchange: (e) => { store.set("wrapCells", e.target.checked); renderOut(); } }), "Wrap long cells"),
+      h("span", {}, q ? `${rows.length} of ${tb.rows.length} rows match` : "Click a header to sort, a cell to copy.")),
+    h("div", { class: "tablewrap" }, h("table", {},
+      h("thead", {}, h("tr", {}, h("th", {}, "#"), cols.map(th))),
+      h("tbody", {}, rows.slice(0, 1000).map(([i, r]) => h("tr", {}, h("td", { class: "dim" }, String(i)), cols.map((c) => cell(r?.[c]))))))));
+  if (rows.length > 1000) body.append(h("div", { class: "note" }, `Showing the first 1000 of ${rows.length} rows.`));
+};
+
+let filterTimer;
+$("outFilter").oninput = () => { clearTimeout(filterTimer); filterTimer = setTimeout(renderOut, 120); };
+$("outFilter").onkeydown = (e) => { if (e.key === "Escape") { $("outFilter").value = ""; renderOut(); } };
+const clearFilterBtn = () => h("button", { class: "linkbtn", onclick: () => { $("outFilter").value = ""; renderOut(); } }, "Clear filter");
+const setAllOpen = (open) => {
+  if (S.view !== "tree") setView("tree");
+  // Opening fills lazy children, which adds more <details>; loop until stable.
+  for (let i = 0; i < 12; i++) {
+    const closed = [...$("outBody").querySelectorAll("details")].filter((d) => d.open !== open);
+    if (!closed.length) break;
+    closed.forEach((d) => { d.open = open; if (open) d.dispatchEvent(new Event("toggle")); });
+  }
+};
+$("expandAll").onclick = () => setAllOpen(true);
+$("collapseAll").onclick = () => { setAllOpen(false); const root = $("outBody").querySelector(".tree > details"); if (root) root.open = true; };
+$("copyOut").onclick = () => S.out ? copy(typeof S.out.value === "string" ? S.out.value : JSON.stringify(S.out.value, null, 2), "Copied output") : toast("No output to copy");
+$("copyCurl").onclick = () => S.tool && copy(
+  `curl -s localhost:${location.port || 80}/api/call -d '${JSON.stringify({ server: S.server, tool: S.tool.name, args: S.args }).replace(/'/g, "'\\''")}'`, "Copied curl command");
+
+// ---------------------------------------------------------------- history
+const loadHistory = async () => {
+  try { S.history = await fetch("/api/history").then((r) => r.json()); } catch { S.history = []; }
+};
+const openHistory = async (e) => {
+  const out = { value: e.result, failed: e.failed, t: e.t, ms: e.ms, fromHistory: true, args: e.args };
+  if (S.server !== e.server) await loadServer(e.server);
+  const t = S.tools.find((x) => x.name === e.tool);
+  if (!t) return toast(`${short(e.tool)} is no longer on ${e.server}`);
+  selectTool(t, { args: structuredClone(e.args), out });
+  saveDraft();
+};
+
+// ---------------------------------------------------------------- log drawer (polls only while open)
+const pollLogs = async () => {
+  if (!S.logOpen) return;
+  try {
+    const lines = await fetch("/api/logs").then((r) => r.json());
+    const el = $("log"), atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.replaceChildren(...(lines.length ? lines.slice(-150) : ["(no log lines yet)"]).map((l) => {
+      const m = /^\[([\w-]+)\]/.exec(l), tag = m?.[1] || "";
+      const cls = tag === "request" ? "t-request" : tag === "response" ? "t-response" : /error|exception/.test(tag) ? "t-error" : "";
+      return h("div", { class: "ln" }, m ? [h("span", { class: "tag " + cls }, m[0]), l.slice(m[0].length).slice(0, 1500)] : l);
+    }));
+    if (atBottom) el.scrollTop = el.scrollHeight;
+  } catch {}
+};
+const setLog = (open) => {
+  S.logOpen = open; $("logDrawer").hidden = !open; $("logToggle").setAttribute("aria-expanded", String(open));
+  store.set("logOpen", open); if (open) pollLogs();
+};
+$("logToggle").onclick = () => setLog(!S.logOpen);
+$("logClose").onclick = () => setLog(false);
+setInterval(pollLogs, 1500);
+
+// ---------------------------------------------------------------- keyboard
+$("filter").oninput = renderList;
+$("filter").onkeydown = (e) => {
+  if (e.key === "Escape") { $("filter").value = ""; renderList(); }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter") moveSel(e);
+};
+const moveSel = (e) => {
+  if (S.side !== "tools") return;
+  const vis = visibleTools(); if (!vis.length) return;
+  e.preventDefault();
+  if (e.key === "Enter") { if (!vis.includes(S.tool)) selectTool(vis[0]); document.querySelector("#inBody textarea, #inBody input, #inBody select")?.focus(); return; }
+  const i = vis.indexOf(S.tool), n = e.key === "ArrowDown" ? Math.min(i + 1, vis.length - 1) : Math.max(i - 1, 0);
+  selectTool(vis[i < 0 ? 0 : n]);
+};
+$("list").onkeydown = (e) => { if (e.key === "ArrowDown" || e.key === "ArrowUp") { moveSel(e); $("list").querySelector('[aria-selected="true"]')?.focus(); } };
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); run(); return; }
+  if ((e.metaKey || e.ctrlKey) && e.key === "k") { e.preventDefault(); $("filter").focus(); $("filter").select(); return; }
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+  if (e.key === "/" && !typing) { e.preventDefault(); $("filter").focus(); $("filter").select(); }
+});
+$("server").onchange = () => {
+  S.server = $("server").value; $("filter").value = "";
+  resetMain(); loadServer(S.server);
+};
+const resetMain = () => {
+  S.tool = null; S.toolServer = null; S.args = {}; S.cmp = null; document.title = "MCP Hub"; syncHash();
+  $("examples").replaceChildren();
+  $("name").className = "dim"; $("name").textContent = "Pick a tool"; $("badges").innerHTML = ""; $("desc").innerHTML = ""; $("descMore").hidden = true;
+  $("paramInfo").textContent = ""; $("copyCurl").hidden = true; $("run").disabled = $("reset").disabled = true;
+  $("inBody").replaceChildren(h("div", { class: "empty" }, h("h4", {}, "Pick a tool on the left"), "Use ", h("kbd", {}, "/"), " to search, ", h("kbd", {}, "↑"), h("kbd", {}, "↓"), " to move, and ", h("kbd", {}, "⌘"), h("kbd", {}, "↵"), " to run."));
+  setOut(null);
+};
+const fromHash = () => {
+  const [path, query = ""] = location.hash.split("?");
+  const [, server, tool] = path.split("/").map(decodeURIComponent);
+  let args;
+  try { const a = new URLSearchParams(query).get("args"); if (a) args = JSON.parse(a); } catch {}
+  return { server: S.servers.includes(server) ? server : null, tool, args };
+};
+window.addEventListener("hashchange", () => {
+  const { server, tool, args } = fromHash();
+  if (!server) return;
+  if (server === S.server && S.tool && tool === short(S.tool.name)) {
+    if (args) { S.args = args; saveDraft(); renderInput(); renderRunButton(); }
+    return;
+  }
+  if (server !== S.server || !tool) { S.server = server; resetMain(); }
+  loadServer(server, tool, args);
+});
+
+// ---------------------------------------------------------------- boot
+(async () => {
+  S.inMode = store.get("inMode") || "form";
+  const [servers] = await Promise.all([fetch("/api/servers").then((r) => r.json()), loadHistory()]);
+  S.servers = servers;
+  $("server").replaceChildren(...servers.map((n) => h("option", { value: n }, n)));
+  const { server, tool, args } = fromHash();
+  setLog(!!store.get("logOpen"));
+  S.server = server || store.get("server") || servers[0];
+  resetMain();
+  await loadServer(S.server, tool, args);
+  $("server").addEventListener("change", () => store.set("server", $("server").value));
+})();
+</script>
